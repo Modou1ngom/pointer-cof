@@ -1234,8 +1234,20 @@ class PointageController extends Controller
             'latitude' => 'required|numeric|between:-90,90',
             'longitude' => 'required|numeric|between:-180,180',
             'biometric_ok' => 'sometimes|boolean',
+            'device_id' => 'nullable|string|max:128',
+            'serial_number' => 'nullable|string|max:128',
         ]);
         $validated['qr_token'] = PointageQrScanUrl::normalizeScannedContent($validated['qr_token']);
+        if (! empty($validated['device_id'])) {
+            $request->merge([
+                'device_id' => \App\Support\MobileDeviceId::normalize((string) $validated['device_id']),
+            ]);
+        }
+        if (! empty($validated['serial_number'])) {
+            $request->merge([
+                'serial_number' => \App\Support\MobileDeviceId::normalize((string) $validated['serial_number']),
+            ]);
+        }
 
         $agence = $this->resolveAgenceForUser($user);
         if (! $agence || ! $agence->actif || ! $agence->isEnrolledForPointageQr() || ! ($agence->pointage_qr_enabled ?? true)) {

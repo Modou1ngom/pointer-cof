@@ -43,8 +43,21 @@ class AttendanceController extends Controller
             'latitude' => 'required|numeric|between:-90,90',
             'longitude' => 'required|numeric|between:-180,180',
             'biometric_nonce' => 'nullable|string|max:2048',
+            'device_id' => 'nullable|string|max:128',
+            'serial_number' => 'nullable|string|max:128',
             'type' => 'nullable|string|in:checkin,checkout,arrivee,depart',
         ]);
+
+        if (! empty($validated['device_id'])) {
+            $request->merge([
+                'device_id' => \App\Support\MobileDeviceId::normalize((string) $validated['device_id']),
+            ]);
+        }
+        if (! empty($validated['serial_number'])) {
+            $request->merge([
+                'serial_number' => \App\Support\MobileDeviceId::normalize((string) $validated['serial_number']),
+            ]);
+        }
 
         $parsed = PointrustQrPayloadService::parse($validated['qr_payload']);
         if ($parsed === null) {

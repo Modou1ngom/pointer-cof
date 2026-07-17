@@ -5,6 +5,7 @@ namespace App\Services\Pointage;
 use App\Models\Agence;
 use App\Models\Pointage;
 use App\Models\User;
+use App\Support\PointageDeviceDayGuard;
 use App\Support\PointageEnrolment;
 use App\Support\PointageJourSemaine;
 use Carbon\Carbon;
@@ -69,6 +70,12 @@ final class PointagePunchService
             return ['ok' => false, 'message' => 'Un pointage '.$libelle.' existe déjà pour aujourd\'hui.'];
         }
 
+        $deviceFingerprint = PointageDeviceDayGuard::fingerprintFromMeta($metaExtra);
+        $deviceGuard = PointageDeviceDayGuard::assertAvailableForUser($user, $deviceFingerprint, $today);
+        if (! $deviceGuard['ok']) {
+            return ['ok' => false, 'message' => $deviceGuard['message'] ?? PointageDeviceDayGuard::BLOCK_MESSAGE];
+        }
+
         $effective = $this->horaires->computeEffectivePunch($clockedAt, $type, $resolved['plage'] ?? null);
 
         $meta = array_merge($metaExtra, [
@@ -80,6 +87,9 @@ final class PointagePunchService
             'requested_type' => $resolved['requested_type'] ?? null,
             'type_auto_corrected' => $resolved['type_auto_corrected'] ?? false,
         ]);
+        if ($deviceFingerprint !== null) {
+            $meta['device_fingerprint'] = $deviceFingerprint;
+        }
 
         $pointage = Pointage::query()->create([
             'user_id' => $user->id,
@@ -146,9 +156,12 @@ final class PointagePunchService
 
     public function requestMeta(Request $request): array
     {
-        return array_filter([
-            'user_agent' => $request->userAgent(),
-            'pointrust' => $request->header('X-Pointrust-App') ? true : null,
-        ]);
+        return array_filter(array_merge(
+            PointageDeviceDayGuard::metaFromRequest($request),
+            [
+                'user_agent' => $request->userAgent(),
+                'pointrust' => $request->header('X-Pointrust-App') ? true : null,
+            ]
+        ), static fn ($v) => $v !== null && $v !== '');
     }
 }

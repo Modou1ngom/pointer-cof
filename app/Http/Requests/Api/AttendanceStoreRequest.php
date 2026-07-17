@@ -21,7 +21,21 @@ class AttendanceStoreRequest extends FormRequest
         $this->mergeSnakeFromCamelPairs([
             ['qr_payload', 'qrPayload'],
             ['biometric_nonce', 'biometricNonce'],
+            ['device_id', 'deviceId'],
+            ['serial_number', 'serialNumber'],
         ]);
+
+        if ($this->filled('device_id')) {
+            $this->merge([
+                'device_id' => \App\Support\MobileDeviceId::normalize((string) $this->input('device_id')),
+            ]);
+        }
+
+        if ($this->filled('serial_number')) {
+            $this->merge([
+                'serial_number' => \App\Support\MobileDeviceId::normalize((string) $this->input('serial_number')),
+            ]);
+        }
 
         $raw = (string) ($this->input('qr_payload') ?? '');
         if ($raw !== '') {
@@ -41,6 +55,8 @@ class AttendanceStoreRequest extends FormRequest
             'latitude' => ['required', 'numeric', 'between:-90,90'],
             'longitude' => ['required', 'numeric', 'between:-180,180'],
             'biometric_nonce' => ['nullable', 'string', 'max:2048'],
+            'device_id' => ['nullable', 'string', 'max:128'],
+            'serial_number' => ['nullable', 'string', 'max:128'],
             'type' => ['nullable', 'string', Rule::in(['checkin', 'checkout', 'arrivee', 'depart'])],
         ];
     }
