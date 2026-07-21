@@ -108,18 +108,33 @@ const form = useForm({
     compte_must_change_password: props.compte?.must_change_password ?? true,
     compte_password: '',
     compte_password_confirmation: '',
-    compte_role_ids: (props.compte?.role_ids ?? []) as number[],
+    compte_role_ids: ((props.compte?.role_ids ?? []) as Array<number | string>).map((id) => Number(id)),
 });
 
 function toggleCompteRole(roleId: number, checked: boolean) {
+    const id = Number(roleId);
+    const current = (form.compte_role_ids ?? []).map((existingId) => Number(existingId));
     if (checked) {
-        if (!form.compte_role_ids.includes(roleId)) {
-            form.compte_role_ids = [...form.compte_role_ids, roleId];
-        }
+        form.compte_role_ids = current.includes(id) ? current : [...current, id];
     } else {
-        form.compte_role_ids = form.compte_role_ids.filter((id) => id !== roleId);
+        form.compte_role_ids = current.filter((existingId) => existingId !== id);
     }
 }
+
+const submit = () => {
+    form
+        .transform((data) => ({
+            ...data,
+            create_compte: !!data.create_compte,
+            compte_is_active: !!data.compte_is_active,
+            compte_must_change_password: !!data.compte_must_change_password,
+            // Toujours envoyer un tableau d'entiers (évite l'omission / typage string).
+            compte_role_ids: (data.compte_role_ids ?? []).map((id: number | string) => Number(id)).filter((id) => id > 0),
+        }))
+        .put(`/profils/${props.profil.id}`, {
+            preserveScroll: true,
+        });
+};
 
 // Filtrer les profils pour exclure le profil actuel
 const availableProfils = computed(() => {
@@ -180,12 +195,6 @@ const formatTelephone = (event: Event) => {
     }
     
     form.telephone = value;
-};
-
-const submit = () => {
-    form.put(`/profils/${props.profil.id}`, {
-        preserveScroll: true,
-    });
 };
 </script>
 
@@ -467,10 +476,12 @@ const submit = () => {
                                 :key="role.id"
                                 class="flex cursor-pointer items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm hover:bg-gray-50"
                             >
-                                <Checkbox
+                                <input
                                     :id="`compte-role-${role.id}`"
-                                    :checked="form.compte_role_ids.includes(role.id)"
-                                    @update:checked="(checked: boolean) => toggleCompteRole(role.id, checked)"
+                                    type="checkbox"
+                                    class="size-4 rounded border-gray-300 text-[#185FA5] focus:ring-[#185FA5]"
+                                    :checked="form.compte_role_ids.map(Number).includes(Number(role.id))"
+                                    @change="toggleCompteRole(Number(role.id), ($event.target as HTMLInputElement).checked)"
                                 />
                                 <span>{{ role.nom }}</span>
                             </label>

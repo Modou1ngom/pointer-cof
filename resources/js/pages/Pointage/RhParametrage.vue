@@ -11,6 +11,10 @@ const props = defineProps<{
         heure_depart: string;
         heure_arrivee_ajustee: string;
         heure_depart_ajustee: string;
+        plage_arrivee_debut: string;
+        plage_arrivee_fin: string;
+        plage_depart_debut: string;
+        plage_depart_fin: string;
         tolerance_minutes: number;
         base_heures_jour_reference: number;
         seuil_heures_supplementaires_h_jour: number;
@@ -52,6 +56,10 @@ const form = useForm({
     heure_depart: props.config.heure_depart,
     heure_arrivee_ajustee: props.config.heure_arrivee_ajustee,
     heure_depart_ajustee: props.config.heure_depart_ajustee,
+    plage_arrivee_debut: props.config.plage_arrivee_debut,
+    plage_arrivee_fin: props.config.plage_arrivee_fin,
+    plage_depart_debut: props.config.plage_depart_debut,
+    plage_depart_fin: props.config.plage_depart_fin,
     tolerance_minutes: props.config.tolerance_minutes,
     seuil_heures_supplementaires_h_jour: props.config.seuil_heures_supplementaires_h_jour,
     delai_validation_manager_heures: props.config.delai_validation_manager_heures,
@@ -63,6 +71,13 @@ const form = useForm({
     declaration_motifs_autorises: { ...props.config.declaration_motifs_autorises },
 });
 
+const plagesForm = useForm({
+    plage_arrivee_debut: props.config.plage_arrivee_debut,
+    plage_arrivee_fin: props.config.plage_arrivee_fin,
+    plage_depart_debut: props.config.plage_depart_debut,
+    plage_depart_fin: props.config.plage_depart_fin,
+});
+
 function motifModel(key: string): boolean {
     return !!form.declaration_motifs_autorises[key];
 }
@@ -72,7 +87,19 @@ function setMotif(key: string, value: boolean) {
 }
 
 function submit() {
-    form.post('/pointage/rh/parametrage', { preserveScroll: true });
+    form
+        .transform((data) => ({
+            ...data,
+            plage_arrivee_debut: plagesForm.plage_arrivee_debut,
+            plage_arrivee_fin: plagesForm.plage_arrivee_fin,
+            plage_depart_debut: plagesForm.plage_depart_debut,
+            plage_depart_fin: plagesForm.plage_depart_fin,
+        }))
+        .post('/pointage/rh/parametrage', { preserveScroll: true });
+}
+
+function submitPlages() {
+    plagesForm.post('/pointage/rh/parametrage/plages', { preserveScroll: true });
 }
 </script>
 
@@ -83,9 +110,9 @@ function submit() {
                 <div>
                     <h1 class="text-xl font-semibold text-[#0C447C]">Gestion des Horaires</h1>
                     <p class="mt-1 max-w-3xl text-sm text-[#5c5a57]">
-                        Création des horaires de travail (référence globale) : heures prévues, heures ajustées pour le
-                        reporting, tolérances. Les heures réelles de pointage restent disponibles dans l’historique pour
-                        audit.
+                        Création des horaires de travail (référence globale) : heures prévues, plages de scan
+                        arrivée/départ, heures ajustées pour le reporting, tolérances. Les heures réelles de pointage
+                        restent disponibles dans l’historique pour audit.
                     </p>
                 </div>
                 <button
@@ -172,6 +199,88 @@ function submit() {
                                 />
                             </div>
                             <p v-if="form.errors.heure_depart_ajustee" class="mt-1 text-xs text-red-600">{{ form.errors.heure_depart_ajustee }}</p>
+                        </div>
+                        <div class="rounded-md border border-dashed border-[#e2e0d8] bg-[#f8f7f4] p-3">
+                            <div class="flex items-start justify-between gap-3">
+                                <div>
+                                    <p class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Plages de pointage (scan)</p>
+                                    <p class="mt-1 text-xs leading-relaxed text-[#5c5a57]">
+                                        Hors de ces plages, le pointage est refusé. L’heure courante décide si c’est une
+                                        <strong class="text-[#0C447C]">arrivée</strong> ou un
+                                        <strong class="text-[#0C447C]">départ</strong>.
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    class="shrink-0 rounded-md bg-[#185FA5] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#144a84] disabled:opacity-60"
+                                    :disabled="plagesForm.processing"
+                                    @click="submitPlages"
+                                >
+                                    {{ plagesForm.processing ? '…' : 'Enregistrer' }}
+                                </button>
+                            </div>
+                            <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                                <div>
+                                    <label class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#888780]" for="plage-arr-debut">
+                                        Arrivée — début
+                                    </label>
+                                    <input
+                                        id="plage-arr-debut"
+                                        v-model="plagesForm.plage_arrivee_debut"
+                                        type="time"
+                                        step="60"
+                                        class="w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm text-[#0C447C]"
+                                    />
+                                    <p v-if="plagesForm.errors.plage_arrivee_debut" class="mt-1 text-xs text-red-600">
+                                        {{ plagesForm.errors.plage_arrivee_debut }}
+                                    </p>
+                                </div>
+                                <div>
+                                    <label class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#888780]" for="plage-arr-fin">
+                                        Arrivée — fin
+                                    </label>
+                                    <input
+                                        id="plage-arr-fin"
+                                        v-model="plagesForm.plage_arrivee_fin"
+                                        type="time"
+                                        step="60"
+                                        class="w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm text-[#0C447C]"
+                                    />
+                                    <p v-if="plagesForm.errors.plage_arrivee_fin" class="mt-1 text-xs text-red-600">
+                                        {{ plagesForm.errors.plage_arrivee_fin }}
+                                    </p>
+                                </div>
+                                <div>
+                                    <label class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#888780]" for="plage-dep-debut">
+                                        Départ — début
+                                    </label>
+                                    <input
+                                        id="plage-dep-debut"
+                                        v-model="plagesForm.plage_depart_debut"
+                                        type="time"
+                                        step="60"
+                                        class="w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm text-[#0C447C]"
+                                    />
+                                    <p v-if="plagesForm.errors.plage_depart_debut" class="mt-1 text-xs text-red-600">
+                                        {{ plagesForm.errors.plage_depart_debut }}
+                                    </p>
+                                </div>
+                                <div>
+                                    <label class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#888780]" for="plage-dep-fin">
+                                        Départ — fin
+                                    </label>
+                                    <input
+                                        id="plage-dep-fin"
+                                        v-model="plagesForm.plage_depart_fin"
+                                        type="time"
+                                        step="60"
+                                        class="w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm text-[#0C447C]"
+                                    />
+                                    <p v-if="plagesForm.errors.plage_depart_fin" class="mt-1 text-xs text-red-600">
+                                        {{ plagesForm.errors.plage_depart_fin }}
+                                    </p>
+                                </div>
+                            </div>
                         </div>
                         <div>
                             <label class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#888780]" for="tolerance">Tolérance retard (minutes)</label>

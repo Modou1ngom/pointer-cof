@@ -136,6 +136,7 @@ Route::middleware(['auth'])->group(function () {
             Route::get('/rh/parametrage', [PointageController::class, 'rhParametrage'])->name('rh.parametrage');
             Route::get('/rh/parametrage/export-fiche', [PointageController::class, 'rhParametrageFicheExport'])->name('rh.parametrage.export-fiche');
             Route::post('/rh/parametrage', [PointageController::class, 'rhParametrageUpdate'])->name('rh.parametrage.update');
+            Route::post('/rh/parametrage/plages', [PointageController::class, 'rhParametragePlagesUpdate'])->name('rh.parametrage.plages');
 
             Route::post('sites/regenerer-tous-qr', [PointageSiteController::class, 'regenererTousQr'])
                 ->name('sites.regenerer-tous-qr');

@@ -376,10 +376,11 @@ class ProfilController extends Controller
         ?string $password = null,
         ?bool $isActive = null,
         ?bool $mustChangePassword = null,
-        bool $createIfMissing = false
+        bool $createIfMissing = false,
+        ?User $knownUser = null
     ): ?User {
         $email = mb_strtolower(trim((string) ($profil->email ?? '')));
-        $user = $this->findCompteForProfil($profil);
+        $user = $knownUser ?? $this->findCompteForProfil($profil);
 
         if ($user === null && ! $createIfMissing) {
             return null;
@@ -685,7 +686,7 @@ class ProfilController extends Controller
                 'id' => $compteUser->id,
                 'is_active' => (bool) $compteUser->is_active,
                 'must_change_password' => (bool) $compteUser->must_change_password,
-                'role_ids' => $compteUser->roles->pluck('id')->all(),
+                'role_ids' => $compteUser->roles->pluck('id')->map(fn ($id) => (int) $id)->values()->all(),
             ] : null,
             'roles' => $canManageComptes
                 ? Role::query()->where('actif', true)->orderBy('nom')->get(['id', 'nom', 'slug'])
@@ -753,12 +754,16 @@ class ProfilController extends Controller
 
         $compteFields = ['create_compte', 'compte_is_active', 'compte_must_change_password', 'compte_password', 'compte_password_confirmation', 'compte_role_ids'];
         $profilData = collect($validated)->except($compteFields)->all();
+
+        // Retrouver le compte AVANT la mise à jour du profil (email/matricule peuvent changer).
+        $existingCompte = $canManageComptes ? $this->findCompteForProfil($profil) : null;
+
         $profil->update($profilData);
         $profil->refresh();
 
         if ($canManageComptes) {
             $createCompte = $request->boolean('create_compte');
-            $existingCompte = $this->findCompteForProfil($profil);
+            $compteUser = $existingCompte;
 
             if ($createCompte || $existingCompte !== null) {
                 $password = $request->filled('compte_password') ? (string) $request->input('compte_password') : null;
@@ -768,18 +773,30 @@ class ProfilController extends Controller
                     ])->withInput();
                 }
 
-                $compteUser = $this->syncCompteForProfil(
+                $synced = $this->syncCompteForProfil(
                     $profil,
                     $password,
-                    $request->has('compte_is_active') ? $request->boolean('compte_is_active') : null,
-                    $request->has('compte_must_change_password') ? $request->boolean('compte_must_change_password') : null,
-                    $createCompte && $existingCompte === null
+                    $request->exists('compte_is_active') ? $request->boolean('compte_is_active') : null,
+                    $request->exists('compte_must_change_password') ? $request->boolean('compte_must_change_password') : null,
+                    $createCompte && $existingCompte === null,
+                    $existingCompte
                 );
 
-                if ($compteUser !== null && $request->has('compte_role_ids')) {
-                    $roleIds = array_map('intval', $request->input('compte_role_ids', []));
-                    $compteUser->roles()->sync($roleIds);
+                if ($synced !== null) {
+                    $compteUser = $synced;
                 }
+            }
+
+            // exists() (pas has()) : un tableau vide doit aussi synchroniser (retrait de tous les rôles).
+            if ($compteUser !== null && $request->exists('compte_role_ids')) {
+                $roleIds = array_values(array_unique(array_map(
+                    'intval',
+                    (array) ($validated['compte_role_ids'] ?? $request->input('compte_role_ids', []))
+                )));
+                $roleIds = array_values(array_filter($roleIds, fn (int $id) => $id > 0));
+                $compteUser->roles()->sync($roleIds);
+                // Aligner aussi profile_role (hasRole() consulte les deux).
+                $profil->roles()->sync($roleIds);
             }
         }
 

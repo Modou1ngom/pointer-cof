@@ -1066,6 +1066,10 @@ class PointageController extends Controller
             'heure_depart' => 'required|date_format:H:i',
             'heure_arrivee_ajustee' => 'required|date_format:H:i',
             'heure_depart_ajustee' => 'required|date_format:H:i',
+            'plage_arrivee_debut' => 'required|date_format:H:i',
+            'plage_arrivee_fin' => 'required|date_format:H:i|after:plage_arrivee_debut',
+            'plage_depart_debut' => 'required|date_format:H:i',
+            'plage_depart_fin' => 'required|date_format:H:i|after:plage_depart_debut',
             'tolerance_minutes' => 'required|integer|min:0|max:180',
             'seuil_heures_supplementaires_h_jour' => 'required|numeric|min:0|max:24',
             'delai_validation_manager_heures' => 'required|integer|min:1|max:720',
@@ -1086,6 +1090,10 @@ class PointageController extends Controller
             'heure_depart' => $validated['heure_depart'],
             'heure_arrivee_ajustee' => $validated['heure_arrivee_ajustee'],
             'heure_depart_ajustee' => $validated['heure_depart_ajustee'],
+            'plage_arrivee_debut' => $validated['plage_arrivee_debut'],
+            'plage_arrivee_fin' => $validated['plage_arrivee_fin'],
+            'plage_depart_debut' => $validated['plage_depart_debut'],
+            'plage_depart_fin' => $validated['plage_depart_fin'],
             'tolerance_minutes' => (int) $validated['tolerance_minutes'],
             'seuil_heures_supplementaires_h_jour' => (float) $validated['seuil_heures_supplementaires_h_jour'],
             'delai_validation_manager_heures' => (int) $validated['delai_validation_manager_heures'],
@@ -1105,6 +1113,37 @@ class PointageController extends Controller
         }
 
         return redirect()->route('pointage.rh.parametrage')->with('success', 'Paramètres enregistrés.');
+    }
+
+    public function rhParametragePlagesUpdate(Request $request)
+    {
+        $user = Auth::user();
+        abort_unless($user && ($user->isRh() || $user->isAdmin()), 403);
+
+        $validated = $request->validate([
+            'plage_arrivee_debut' => 'required|date_format:H:i',
+            'plage_arrivee_fin' => 'required|date_format:H:i|after:plage_arrivee_debut',
+            'plage_depart_debut' => 'required|date_format:H:i',
+            'plage_depart_fin' => 'required|date_format:H:i|after:plage_depart_debut',
+        ]);
+
+        $plages = [
+            'plage_arrivee_debut' => $validated['plage_arrivee_debut'],
+            'plage_arrivee_fin' => $validated['plage_arrivee_fin'],
+            'plage_depart_debut' => $validated['plage_depart_debut'],
+            'plage_depart_fin' => $validated['plage_depart_fin'],
+        ];
+
+        $row = PointageRhSetting::query()->first();
+        if ($row === null) {
+            PointageRhSetting::query()->create(['payload' => $plages]);
+        } else {
+            /** @var array<string, mixed> $existing */
+            $existing = is_array($row->payload) ? $row->payload : [];
+            $row->update(['payload' => array_merge($existing, $plages)]);
+        }
+
+        return redirect()->route('pointage.rh.parametrage')->with('success', 'Plages de pointage enregistrées.');
     }
 
     public function rhParametrageFicheExport(Request $request, PointageFicheHorairesService $ficheService)
@@ -1157,6 +1196,10 @@ class PointageController extends Controller
                 'heure_depart' => (string) config('pointage.heure_depart'),
                 'heure_arrivee_ajustee' => (string) config('pointage.heure_arrivee_ajustee', config('pointage.heure_arrivee')),
                 'heure_depart_ajustee' => (string) config('pointage.heure_depart_ajustee', config('pointage.heure_depart')),
+                'plage_arrivee_debut' => (string) config('pointage.plage_arrivee_debut', '07:00'),
+                'plage_arrivee_fin' => (string) config('pointage.plage_arrivee_fin', '12:00'),
+                'plage_depart_debut' => (string) config('pointage.plage_depart_debut', '15:00'),
+                'plage_depart_fin' => (string) config('pointage.plage_depart_fin', '20:00'),
                 'tolerance_minutes' => (int) config('pointage.tolerance_minutes'),
                 'base_heures_jour_reference' => (float) config('pointage.base_heures_jour_reference', 8),
                 'seuil_heures_supplementaires_h_jour' => (float) config('pointage.seuil_heures_supplementaires_h_jour', 9),
