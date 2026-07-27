@@ -27,6 +27,7 @@ interface SiteDepuisProfil {
 const props = defineProps<{
     filiales: Filiale[];
     sitesDepuisProfils: SiteDepuisProfil[];
+    agencesExistantes?: { id: number; nom: string; code_agent: string | null; filiale_id: number | null }[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -44,11 +45,22 @@ const form = useForm({
     latitude: '' as string | number | '',
     longitude: '' as string | number | '',
     rayon_geofencing_metres: 50,
-    pointage_qr_type: 'dynamic',
+    pointage_qr_type: 'dynamic' as 'dynamic' | 'static',
+    is_virtual: false,
+    parent_agence_id: null as number | null,
     actif: 'actif' as 'actif' | 'inactif',
     chef_agence_id: null as number | null,
     filiale_id: null as number | null,
 });
+
+watch(
+    () => form.is_virtual,
+    (v) => {
+        if (v) {
+            form.pointage_qr_type = 'static';
+        }
+    },
+);
 
 function applySiteDepuisProfil(siteKey: string) {
     if (!siteKey) {
@@ -186,12 +198,35 @@ function submit() {
                         class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm"
                     />
                 </div>
+                <div class="rounded-md border border-dashed border-[#e2e0d8] bg-[#f8f7f4] p-3 space-y-3">
+                    <label class="flex items-start gap-2 text-sm text-[#0C447C]">
+                        <input v-model="form.is_virtual" type="checkbox" class="mt-1 rounded border-[#e2e0d8]" />
+                        <span>
+                            <strong>Agence virtuelle</strong>
+                            <span class="mt-0.5 block text-xs text-[#5c5a57]">
+                                Borne partagée (1 téléphone) : QR statique, pointage des enrôlés par e-mail + OTP.
+                            </span>
+                        </span>
+                    </label>
+                    <div v-if="form.is_virtual && (agencesExistantes?.length ?? 0) > 0">
+                        <label class="text-[11px] font-bold uppercase text-[#888780]">Agence parente (optionnel)</label>
+                        <select v-model="form.parent_agence_id" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
+                            <option :value="null">— Aucune —</option>
+                            <option v-for="a in agencesExistantes" :key="a.id" :value="a.id">{{ a.nom }}</option>
+                        </select>
+                    </div>
+                </div>
                 <div>
                     <label class="text-[11px] font-bold uppercase text-[#888780]">Type QR</label>
-                    <select v-model="form.pointage_qr_type" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
+                    <select
+                        v-model="form.pointage_qr_type"
+                        class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm"
+                        :disabled="form.is_virtual"
+                    >
                         <option value="dynamic">Dynamique</option>
                         <option value="static">Statique</option>
                     </select>
+                    <p v-if="form.is_virtual" class="mt-1 text-xs text-[#5c5a57]">QR statique obligatoire pour une agence virtuelle.</p>
                 </div>
                 <div>
                     <label class="text-[11px] font-bold uppercase text-[#888780]">Filiale</label>

@@ -71,9 +71,12 @@ final class PointagePunchService
         }
 
         $deviceFingerprint = PointageDeviceDayGuard::fingerprintFromMeta($metaExtra);
-        $deviceGuard = PointageDeviceDayGuard::assertAvailableForUser($user, $deviceFingerprint, $today);
-        if (! $deviceGuard['ok']) {
-            return ['ok' => false, 'message' => $deviceGuard['message'] ?? PointageDeviceDayGuard::BLOCK_MESSAGE];
+        // Borne virtuelle : plusieurs comptes partagent le même appareil le même jour.
+        if (! $agence->isVirtual()) {
+            $deviceGuard = PointageDeviceDayGuard::assertAvailableForUser($user, $deviceFingerprint, $today);
+            if (! $deviceGuard['ok']) {
+                return ['ok' => false, 'message' => $deviceGuard['message'] ?? PointageDeviceDayGuard::BLOCK_MESSAGE];
+            }
         }
 
         $effective = $this->horaires->computeEffectivePunch($clockedAt, $type, $resolved['plage'] ?? null);

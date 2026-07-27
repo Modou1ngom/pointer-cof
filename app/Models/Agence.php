@@ -26,12 +26,16 @@ class Agence extends Model
         'pointage_qr_enrolled_at',
         'pointage_kiosk_token',
         'actif',
+        'is_virtual',
+        'parent_agence_id',
+        'kiosk_serial_number',
         'chef_agence_id',
         'filiale_id',
     ];
 
     protected $casts = [
         'actif' => 'boolean',
+        'is_virtual' => 'boolean',
         'latitude' => 'float',
         'longitude' => 'float',
         'rayon_geofencing_metres' => 'integer',
@@ -40,6 +44,21 @@ class Agence extends Model
         'pointage_qr_enabled' => 'boolean',
         'pointage_qr_enrolled_at' => 'datetime',
     ];
+
+    public function isVirtual(): bool
+    {
+        return (bool) $this->is_virtual;
+    }
+
+    public function parentAgence()
+    {
+        return $this->belongsTo(self::class, 'parent_agence_id');
+    }
+
+    public function virtualChildren()
+    {
+        return $this->hasMany(self::class, 'parent_agence_id');
+    }
 
     /**
      * Agences ayant complété l’enrôlement « Génération QR Code » (module pointage).

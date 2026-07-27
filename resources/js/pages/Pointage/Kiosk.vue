@@ -9,6 +9,7 @@ interface AgenceInfo {
     nom: string;
     code_agent?: string | null;
     pointage_qr_type: string;
+    is_virtual?: boolean;
     rayon_geofencing_metres: number;
     has_site_gps?: boolean;
 }
@@ -172,6 +173,10 @@ function scheduleNextRefresh(forceMs?: number) {
         refreshTimer = null;
     }
     if (props.qr_inactif_jour || props.kiosk_unavailable || !currentQr.value) {
+        return;
+    }
+    // Static / virtuel : pas de rotation automatique du QR.
+    if (!props.refresh_url || props.agence?.pointage_qr_type === 'static' || props.agence?.is_virtual) {
         return;
     }
     const msUntilExpiry = expiresAtMs.value - Date.now();

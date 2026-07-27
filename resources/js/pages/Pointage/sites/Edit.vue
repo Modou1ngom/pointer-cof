@@ -16,6 +16,9 @@ interface Agence {
     actif: boolean;
     rayon_geofencing_metres?: number;
     pointage_qr_type?: string;
+    is_virtual?: boolean;
+    parent_agence_id?: number | null;
+    kiosk_serial_number?: string | null;
     chef_agence_id?: number | null;
     filiale_id?: number | null;
 }
@@ -45,6 +48,10 @@ const form = useForm({
     longitude: props.agence.longitude ?? '',
     rayon_geofencing_metres: props.agence.rayon_geofencing_metres ?? 50,
     pointage_qr_type: (props.agence.pointage_qr_type ?? 'dynamic') as 'dynamic' | 'static',
+    is_virtual: Boolean(props.agence.is_virtual),
+    parent_agence_id: props.agence.parent_agence_id ?? null,
+    kiosk_serial_number: props.agence.kiosk_serial_number ?? '',
+    clear_kiosk_serial: false as boolean,
     actif: props.agence.actif ? ('actif' as const) : ('inactif' as const),
     chef_agence_id: props.agence.chef_agence_id ?? null,
     filiale_id: props.agence.filiale_id ?? null,
@@ -113,9 +120,41 @@ function submit() {
                     <label class="text-[11px] font-bold uppercase text-[#888780]">Rayon (m)</label>
                     <input v-model.number="form.rayon_geofencing_metres" type="number" min="10" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
                 </div>
+                <div class="rounded-md border border-dashed border-[#e2e0d8] bg-[#f8f7f4] p-3">
+                    <label class="flex items-start gap-2 text-sm text-[#0C447C]">
+                        <input v-model="form.is_virtual" type="checkbox" class="mt-1 rounded border-[#e2e0d8]" />
+                        <span>
+                            <strong>Agence virtuelle</strong>
+                            <span class="mt-0.5 block text-xs text-[#5c5a57]">
+                                Borne partagée : un seul téléphone (n° de série), pointage des enrôlés par e-mail + OTP.
+                            </span>
+                        </span>
+                    </label>
+                </div>
+                <div v-if="form.is_virtual" class="rounded-md border border-[#e2e0d8] bg-[#f8f7f4] p-3 space-y-2">
+                    <label class="text-[11px] font-bold uppercase text-[#888780]">Téléphone borne (n° de série)</label>
+                    <p class="text-xs text-[#5c5a57]">
+                        Verrouillé au premier scan depuis l’app. Un seul appareil peut pointer sur cette agence.
+                    </p>
+                    <input
+                        v-model="form.kiosk_serial_number"
+                        type="text"
+                        readonly
+                        class="mt-1 w-full rounded-md border border-[#e2e0d8] bg-white px-3 py-2 text-sm text-[#5c5a57]"
+                        placeholder="Aucun appareil enregistré"
+                    />
+                    <label class="flex items-center gap-2 text-sm text-[#0C447C]">
+                        <input v-model="form.clear_kiosk_serial" type="checkbox" class="rounded border-[#e2e0d8]" />
+                        Réinitialiser le téléphone autorisé (prochain scan = nouvel appareil)
+                    </label>
+                </div>
                 <div>
                     <label class="text-[11px] font-bold uppercase text-[#888780]">Type QR</label>
-                    <select v-model="form.pointage_qr_type" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
+                    <select
+                        v-model="form.pointage_qr_type"
+                        class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm"
+                        :disabled="form.is_virtual"
+                    >
                         <option value="dynamic">Dynamique</option>
                         <option value="static">Statique</option>
                     </select>

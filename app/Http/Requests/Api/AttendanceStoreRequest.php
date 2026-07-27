@@ -23,8 +23,20 @@ class AttendanceStoreRequest extends FormRequest
             ['biometric_nonce', 'biometricNonce'],
             ['device_id', 'deviceId'],
             ['serial_number', 'serialNumber'],
+            ['otp_code', 'otpCode'],
         ]);
 
+        if ($this->filled('matricule')) {
+            $this->merge([
+                'matricule' => \App\Support\PointageVirtualMatriculeAuth::normalize((string) $this->input('matricule')),
+            ]);
+        }
+
+        if ($this->filled('email')) {
+            $this->merge([
+                'email' => \App\Support\PointageVirtualEmailAuth::normalize((string) $this->input('email')),
+            ]);
+        }
         if ($this->filled('device_id')) {
             $this->merge([
                 'device_id' => \App\Support\MobileDeviceId::normalize((string) $this->input('device_id')),
@@ -57,6 +69,9 @@ class AttendanceStoreRequest extends FormRequest
             'biometric_nonce' => ['nullable', 'string', 'max:2048'],
             'device_id' => ['nullable', 'string', 'max:128'],
             'serial_number' => ['nullable', 'string', 'max:128'],
+            'matricule' => ['nullable', 'string', 'max:50'],
+            'email' => ['nullable', 'string', 'email', 'max:255'],
+            'otp_code' => ['nullable', 'string', 'max:12'],
             'type' => ['nullable', 'string', Rule::in(['checkin', 'checkout', 'arrivee', 'depart'])],
         ];
     }

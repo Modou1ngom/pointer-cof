@@ -31,6 +31,8 @@ interface Agence {
     pointage_plage_fin?: string | null;
     pointage_qr_enabled?: boolean;
     is_enrolled?: boolean;
+    is_virtual?: boolean;
+    parent_agence_id?: number | null;
     kiosk_url?: string | null;
 }
 
@@ -439,6 +441,14 @@ function regenKioskLink(id: number) {
         return;
     }
     router.post(`/pointage/sites/${id}/regenerer-lien-kiosk`, {}, { preserveScroll: true });
+}
+
+function createVirtual(a: Agence) {
+    if (a.is_virtual) return;
+    if (!confirm(`Créer une agence virtuelle liée à « ${a.nom} » ?\nBorne partagée (1 téléphone) + pointage par e-mail OTP.`)) {
+        return;
+    }
+    router.post(`/pointage/sites/${a.id}/creer-virtuelle`, {}, { preserveScroll: true });
 }
 
 async function toggleQrPause(a: Agence) {
@@ -883,7 +893,17 @@ const disclaimerQr =
                     <tbody>
                             <tr v-for="a in agences.data" :key="a.id" class="border-b border-[#F1EFE8] last:border-0 hover:bg-[#FAFAF8]/80">
                                 <td class="px-4 py-3 font-mono text-xs text-[#0C447C]">{{ a.code_agent || '—' }}</td>
-                                <td class="px-4 py-3 font-semibold text-[#0C447C]">{{ a.nom }}</td>
+                                <td class="px-4 py-3 font-semibold text-[#0C447C]">
+                                    <span class="inline-flex flex-wrap items-center gap-1.5">
+                                        {{ a.nom }}
+                                        <span
+                                            v-if="a.is_virtual"
+                                            class="rounded-full bg-[#FFF3D0] px-2 py-0.5 text-[10px] font-bold uppercase text-[#854F0B]"
+                                        >
+                                            Virtuelle
+                                        </span>
+                                    </span>
+                                </td>
                                 <td class="max-w-[160px] px-4 py-3 text-sm text-[#888780]">{{ a.region_label || '—' }}</td>
                                 <td class="max-w-[280px] px-4 py-3 text-[#888780]">
                                     <span class="line-clamp-2" :title="a.description ?? ''">{{ a.adresse_courte ?? '—' }}</span>
@@ -935,6 +955,17 @@ const disclaimerQr =
                                         >
                                             Site
                                         </Link>
+                                        <template v-if="!a.is_virtual">
+                                            <span class="text-[#e2e0d8]" aria-hidden="true">·</span>
+                                            <button
+                                                type="button"
+                                                class="text-[#27500A] underline hover:no-underline"
+                                                title="Créer une agence virtuelle liée (borne + e-mail OTP)"
+                                                @click="createVirtual(a)"
+                                            >
+                                                + Virtuelle
+                                            </button>
+                                        </template>
                                         <span class="text-[#e2e0d8]" aria-hidden="true">·</span>
                                         <button
                                             type="button"

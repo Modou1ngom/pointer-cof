@@ -24,6 +24,11 @@ class PointageOtpService
         return 'pointage_otp_v1:'.$userId;
     }
 
+    private function virtualPunchOtpCacheKey(int $userId): string
+    {
+        return 'pointage_virtual_otp_v1:'.$userId;
+    }
+
     private function sessionCacheKey(string $token): string
     {
         return 'pointage_otp_sess_v1:'.$token;
@@ -351,5 +356,102 @@ class PointageOtpService
     public function revokeOtpSession(string $token): void
     {
         Cache::forget($this->sessionCacheKey($token));
+    }
+
+    /**
+     * OTP e-mail pour pointage sur agence virtuelle (sans SMS / sans jeton QR v2).
+     *
+     * @return array{ok: bool, message?: string, via_log_fallback?: bool}
+     */
+    public function sendVirtualPunchOtp(User $user, Agence $agence, string $qrToken, string $email): array
+    {
+        if (! $agence->isVirtual()) {
+            return ['ok' => false, 'message' => 'Ce site n’est pas une agence virtuelle.'];
+        }
+
+        if (! ($agence->pointage_qr_enabled ?? true)) {
+            return ['ok' => false, 'message' => 'Le QR Code de cette agence est désactivé.'];
+        }
+
+        $email = mb_strtolower(trim($email));
+        if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['ok' => false, 'message' => 'Adresse e-mail invalide.'];
+        }
+
+        $rateKey = 'pointage-virtual-otp-send:'.$user->id;
+        if (RateLimiter::tooManyAttempts($rateKey, 5)) {
+            return ['ok' => false, 'message' => 'Trop de demandes de code. Réessayez dans une minute.'];
+        }
+        RateLimiter::hit($rateKey, 60);
+
+        $code = (string) random_int(100000, 999999);
+
+        Cache::put($this->virtualPunchOtpCacheKey($user->id), [
+            'hash' => password_hash($code, PASSWORD_DEFAULT),
+            'qr_fp' => $this->qrFingerprint($qrToken),
+            'agence_id' => $agence->id,
+            'email' => $email,
+        ], self::OTP_TTL_SECONDS);
+
+        $mailResult = $this->sendOtpEmailToAddress($email, $code, $agence->nom);
+        if (! $mailResult['ok']) {
+            Cache::forget($this->virtualPunchOtpCacheKey($user->id));
+
+            return ['ok' => false, 'message' => $mailResult['message'] ?? 'Envoi de l’e-mail impossible. Réessayez plus tard.'];
+        }
+
+        $msg = 'Un code à 6 chiffres a été envoyé sur '.$email.'.';
+        if ($mailResult['via_log_fallback'] ?? false) {
+            $msg .= ' (E-mail journalisé dans storage/logs — configurez SMTP.)';
+        }
+
+        return [
+            'ok' => true,
+            'message' => $msg,
+            'via_log_fallback' => (bool) ($mailResult['via_log_fallback'] ?? false),
+        ];
+    }
+
+    /**
+     * Vérifie et consomme l’OTP virtuel (une seule utilisation).
+     *
+     * @return array{ok: bool, message?: string}
+     */
+    public function consumeVirtualPunchOtp(User $user, Agence $agence, string $qrToken, string $code, string $email): array
+    {
+        if (! $agence->isVirtual()) {
+            return ['ok' => false, 'message' => 'Ce site n’est pas une agence virtuelle.'];
+        }
+
+        $code = preg_replace('/\s+/', '', trim($code)) ?? '';
+        if (strlen($code) !== 6 || ! ctype_digit($code)) {
+            return ['ok' => false, 'message' => 'Saisissez le code à 6 chiffres reçu par e-mail.'];
+        }
+
+        $email = mb_strtolower(trim($email));
+        $row = Cache::get($this->virtualPunchOtpCacheKey($user->id));
+        if (! is_array($row) || empty($row['hash'])) {
+            return ['ok' => false, 'message' => 'Aucun code actif. Demandez un nouveau code.'];
+        }
+
+        if ((int) ($row['agence_id'] ?? 0) !== $agence->id) {
+            return ['ok' => false, 'message' => 'Site de pointage incohérent.'];
+        }
+
+        if (($row['email'] ?? '') !== $email) {
+            return ['ok' => false, 'message' => 'E-mail incohérent avec la demande de code.'];
+        }
+
+        if (($row['qr_fp'] ?? '') !== $this->qrFingerprint($qrToken)) {
+            return ['ok' => false, 'message' => 'QR Code incohérent avec la demande de code. Reprenez le scan.'];
+        }
+
+        if (! password_verify($code, $row['hash'])) {
+            return ['ok' => false, 'message' => 'Code incorrect.'];
+        }
+
+        Cache::forget($this->virtualPunchOtpCacheKey($user->id));
+
+        return ['ok' => true, 'message' => 'Code validé.'];
     }
 }

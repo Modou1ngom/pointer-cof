@@ -146,6 +146,8 @@ Route::middleware(['auth'])->group(function () {
             Route::post('sites/{site}/desactiver-qr', [PointageSiteController::class, 'desactiverQr'])->name('sites.desactiver-qr');
             Route::post('sites/update-rayons', [PointageSiteController::class, 'updateRayons'])
                 ->name('sites.update-rayons');
+            Route::post('sites/{site}/creer-virtuelle', [PointageSiteController::class, 'storeVirtual'])
+                ->name('sites.creer-virtuelle');
             Route::resource('sites', PointageSiteController::class)->except(['show']);
             Route::post('sites/{site}/regenerer-qr', [PointageSiteController::class, 'regenererQr'])
                 ->name('sites.regenerer-qr');

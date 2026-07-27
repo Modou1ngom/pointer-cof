@@ -49,12 +49,16 @@ class PointageKioskController extends Controller
                 'id' => $agence->id,
                 'nom' => $agence->nom,
                 'code_agent' => $agence->code_agent,
-                'pointage_qr_type' => $agence->pointage_qr_type ?? 'dynamic',
+                'pointage_qr_type' => $agence->isVirtual() ? 'static' : ($agence->pointage_qr_type ?? 'dynamic'),
+                'is_virtual' => $agence->isVirtual(),
                 'rayon_geofencing_metres' => $agence->rayon_geofencing_metres ?? 50,
                 'has_site_gps' => $agence->latitude !== null && $agence->longitude !== null,
             ],
             'qr' => $minted,
-            'refresh_url' => route('pointage.kiosk.qr', ['token' => $agence->pointage_kiosk_token]),
+            // Virtuel / static : pas de refresh auto (QR longue durée).
+            'refresh_url' => ($agence->isVirtual() || ($agence->pointage_qr_type === 'static'))
+                ? null
+                : route('pointage.kiosk.qr', ['token' => $agence->pointage_kiosk_token]),
             'location_url' => $autoSiteGps
                 ? route('pointage.kiosk.location', ['token' => $agence->pointage_kiosk_token])
                 : null,

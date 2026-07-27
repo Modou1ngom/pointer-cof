@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Agence;
 use App\Models\User;
+use App\Support\PointageQrBase64;
 use App\Support\PointageQrScanUrl;
 use Carbon\Carbon;
 
@@ -34,11 +35,13 @@ class PointageQrService
         }
 
         $secret = $this->ensureSecret($agence);
-        $ttl = $agence->pointage_qr_type === 'static'
-            ? 86400 * 365
+        // Virtuel / static : QR longue durée (borne partagée imprimable). Dynamique : TTL court.
+        $isLongLived = $agence->isVirtual() || ($agence->pointage_qr_type === 'static');
+        $ttl = $isLongLived
+            ? (int) config('pointage.qr_static_ttl_seconds', 86400 * 365 * 10)
             : (int) config('pointage.qr_dynamic_ttl_seconds', 300);
 
-        $exp = Carbon::now()->addSeconds($ttl)->timestamp;
+        $exp = Carbon::now()->addSeconds(max(60, $ttl))->timestamp;
         $payload = [
             'v' => $user ? self::PAYLOAD_VERSION_BOUND : 1,
             'aid' => $agence->id,
@@ -81,7 +84,7 @@ class PointageQrService
         }
 
         $secret = $this->ensureSecret($agence);
-        $decoded = base64_decode(strtr($token, '-_', '+/'), true);
+        $decoded = PointageQrBase64::urlSafeDecode($token);
         if ($decoded === false || ! str_contains($decoded, '|')) {
             return false;
         }
@@ -103,7 +106,7 @@ class PointageQrService
             return false;
         }
 
-        if (($data['exp'] ?? 0) < Carbon::now()->timestamp) {
+        if (! $this->isLongLivedQr($agence) && ($data['exp'] ?? 0) < Carbon::now()->timestamp) {
             return false;
         }
 
@@ -137,6 +140,11 @@ class PointageQrService
     private function bindEmailNormalized(User $user): string
     {
         return strtolower(trim((string) ($user->profil?->email ?: $user->email)));
+    }
+
+    public function isLongLivedQr(Agence $agence): bool
+    {
+        return $agence->isVirtual() || ($agence->pointage_qr_type === 'static');
     }
 
     /**

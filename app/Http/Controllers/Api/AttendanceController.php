@@ -14,6 +14,10 @@ use App\Support\PointageEnrolment;
 use App\Support\PointageGeofencing;
 use App\Support\PointageJourSemaine;
 use App\Support\PointageQrScanUrl;
+use App\Services\PointageOtpService;
+use App\Support\PointageDeviceDayGuard;
+use App\Support\PointageVirtualEmailAuth;
+use App\Support\PointageVirtualKioskDevice;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Http\JsonResponse;
@@ -22,6 +26,7 @@ class AttendanceController extends Controller
 {
     public function __construct(
         private readonly PointageQrScanResolver $qrScanResolver,
+        private readonly PointageOtpService $otpService,
     ) {}
 
     public function checkin(AttendanceStoreRequest $request, PointagePunchService $punchService): JsonResponse
@@ -117,18 +122,24 @@ class AttendanceController extends Controller
         }
 
         $validated = $request->validated();
-        $user = $request->user();
+        $sessionUser = $request->user();
         $qrContent = PointageQrScanUrl::normalizeScannedContent($validated['qr_payload']);
 
-        $resolved = $this->qrScanResolver->resolve($qrContent, $user);
-        if ($resolved === null) {
+        // Compte borne : pas d’exigence d’enrôlement du token Sanctum pour le QR v1 static.
+        $resolvedDetailed = $this->qrScanResolver->resolveDetailed($qrContent, null);
+        if (($resolvedDetailed['ok'] ?? false) !== true) {
+            // Repli : QR v2 lié à un compte (sites classiques).
+            $resolvedDetailed = $this->qrScanResolver->resolveDetailed($qrContent, $sessionUser);
+        }
+        if (($resolvedDetailed['ok'] ?? false) !== true) {
             return response()->json([
-                'message' => 'QR Code invalide ou expiré',
-                'error' => 'invalid_qr',
+                'message' => $resolvedDetailed['message'] ?? 'QR Code invalide ou expiré',
+                'error' => $resolvedDetailed['error'] ?? 'invalid_qr',
             ], 422);
         }
 
-        $agence = $resolved['agence'];
+        $agence = $resolvedDetailed['agence'];
+        $resolved = $resolvedDetailed;
 
         if (! ($agence->pointage_qr_enabled ?? true)) {
             return response()->json([
@@ -137,12 +148,63 @@ class AttendanceController extends Controller
             ], 422);
         }
 
-        $enrolment = PointageEnrolment::ensureAuthorized($user, $agence);
-        if (! $enrolment['ok']) {
-            return response()->json([
-                'message' => $enrolment['message'],
-                'error' => $enrolment['reason'] ?? 'not_enrolled',
-            ], 403);
+        $punchUser = $sessionUser;
+        $virtualOtpOk = false;
+        $virtualEmail = null;
+
+        if ($agence->isVirtual()) {
+            $deviceMeta = PointageDeviceDayGuard::metaFromRequest($request);
+            $serial = $deviceMeta['serial_number']
+                ?? $deviceMeta['device_fingerprint']
+                ?? ($validated['serial_number'] ?? null);
+            $deviceCheck = PointageVirtualKioskDevice::assertAuthorized($agence, $serial, true);
+            if (! $deviceCheck['ok']) {
+                return response()->json([
+                    'message' => $deviceCheck['message'] ?? PointageVirtualKioskDevice::REQUIRED_MESSAGE,
+                    'error' => 'kiosk_device_forbidden',
+                ], 403);
+            }
+
+            $employeeCheck = PointageVirtualEmailAuth::resolveEnrolledPunchUser(
+                $agence,
+                $validated['email'] ?? null
+            );
+            if (! $employeeCheck['ok'] || ! isset($employeeCheck['user'])) {
+                return response()->json([
+                    'message' => $employeeCheck['message'] ?? PointageVirtualEmailAuth::REQUIRED_MESSAGE,
+                    'error' => 'email_required',
+                    'auth_mode' => 'email_otp',
+                ], 422);
+            }
+
+            $punchUser = $employeeCheck['user'];
+            $virtualEmail = $employeeCheck['email']
+                ?? PointageVirtualEmailAuth::normalize((string) $validated['email']);
+
+            $otpCheck = $this->otpService->consumeVirtualPunchOtp(
+                $punchUser,
+                $agence,
+                $qrContent,
+                (string) ($validated['otp_code'] ?? ''),
+                $virtualEmail,
+            );
+            if (! $otpCheck['ok']) {
+                return response()->json([
+                    'message' => $otpCheck['message'] ?? 'Code OTP invalide.',
+                    'error' => 'otp_invalid',
+                    'auth_mode' => 'email_otp',
+                ], 422);
+            }
+
+            $virtualOtpOk = true;
+        } else {
+            $enrolment = PointageEnrolment::ensureAuthorized($sessionUser, $agence);
+            if (! $enrolment['ok']) {
+                return response()->json([
+                    'message' => $enrolment['message'],
+                    'error' => $enrolment['reason'] ?? 'not_enrolled',
+                ], 403);
+            }
         }
 
         $geo = PointageGeofencing::validate(
@@ -157,17 +219,23 @@ class AttendanceController extends Controller
 
         $requested = $validated['type'] ?? $preferredType;
 
+        $biometricOk = $virtualOtpOk || (($validated['biometric_nonce'] ?? '') !== '');
+
         $punch = $punchService->record(
-            $user,
+            $punchUser,
             $agence,
             (float) $validated['latitude'],
             (float) $validated['longitude'],
             $requested,
             true,
-            ($validated['biometric_nonce'] ?? '') !== '',
+            $biometricOk,
             array_merge($punchService->requestMeta($request), [
                 'api_type' => $apiType,
                 'qr_payload' => $qrContent,
+                'is_virtual' => $agence->isVirtual(),
+                'auth_mode' => $agence->isVirtual() ? 'email_otp' : 'biometric',
+                'email' => $virtualEmail,
+                'kiosk_session_user_id' => $agence->isVirtual() ? $sessionUser->id : null,
             ]),
         );
 
@@ -181,7 +249,7 @@ class AttendanceController extends Controller
 
         $apiAttendanceType = ($punch['type'] ?? '') === 'arrivee' ? 'checkin' : 'checkout';
         Attendance::query()->create([
-            'user_id' => $user->id,
+            'user_id' => $punchUser->id,
             'type' => $apiAttendanceType,
             'qr_payload' => $qrContent,
             'latitude' => (float) $validated['latitude'],
@@ -195,13 +263,13 @@ class AttendanceController extends Controller
             $session = $resolved['session'];
             $session->update([
                 'status' => 'used',
-                'used_by_user_id' => $user->id,
+                'used_by_user_id' => $punchUser->id,
                 'used_at' => $recordedAt,
             ]);
         }
 
         Notification::query()->create([
-            'user_id' => $user->id,
+            'user_id' => $punchUser->id,
             'title' => 'Pointage enregistré',
             'body' => ($punch['message'] ?? 'Pointage enregistré').' — '.$recordedAt->format('d/m/Y H\hi'),
             'read' => false,

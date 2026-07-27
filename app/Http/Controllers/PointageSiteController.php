@@ -70,6 +70,8 @@ class PointageSiteController extends Controller
                 'employes_count' => $employesCount,
                 'adresse_courte' => $adresseCourte,
                 'region_label' => $agence->filiale?->nom,
+                'is_virtual' => (bool) $agence->is_virtual,
+                'parent_agence_id' => $agence->parent_agence_id,
                 'kiosk_url' => $agence->pointage_kiosk_token
                     ? route('pointage.kiosk.show', ['token' => $agence->pointage_kiosk_token])
                     : null,
@@ -94,6 +96,12 @@ class PointageSiteController extends Controller
         $filiales = Filiale::where('actif', true)->orderBy('nom')->get(['id', 'nom']);
 
         $nomsAgencesExistants = Agence::query()->pluck('nom')->all();
+
+        $agencesExistantes = Agence::query()
+            ->enrolledForPointageQr()
+            ->where('is_virtual', false)
+            ->orderBy('nom')
+            ->get(['id', 'nom', 'code_agent', 'filiale_id']);
 
         $sitesDepuisProfils = Profil::query()
             ->whereNotNull('site')
@@ -128,6 +136,7 @@ class PointageSiteController extends Controller
         return Inertia::render('Pointage/sites/Create', [
             'filiales' => $filiales,
             'sitesDepuisProfils' => $sitesDepuisProfils,
+            'agencesExistantes' => $agencesExistantes,
         ]);
     }
 
@@ -143,10 +152,14 @@ class PointageSiteController extends Controller
             'longitude' => ['nullable', 'required_with:latitude', 'numeric', 'between:-180,180'],
             'rayon_geofencing_metres' => 'nullable|integer|min:10|max:2000',
             'pointage_qr_type' => 'required|in:dynamic,static',
+            'is_virtual' => 'nullable|boolean',
+            'parent_agence_id' => 'nullable|integer|exists:agences,id',
             'actif' => 'required|in:actif,inactif',
             'chef_agence_id' => 'nullable|exists:profiles,id',
             'filiale_id' => 'nullable|exists:filiales,id',
         ]);
+
+        $isVirtual = (bool) ($validated['is_virtual'] ?? false);
 
         $agence = Agence::create([
             'nom' => $validated['nom'],
@@ -155,11 +168,13 @@ class PointageSiteController extends Controller
             'latitude' => $validated['latitude'] ?? null,
             'longitude' => $validated['longitude'] ?? null,
             'rayon_geofencing_metres' => $validated['rayon_geofencing_metres'] ?? 50,
-            'pointage_qr_type' => $validated['pointage_qr_type'],
+            'pointage_qr_type' => $isVirtual ? 'static' : $validated['pointage_qr_type'],
             'pointage_qr_secret' => bin2hex(random_bytes(32)),
             'pointage_qr_enrolled_at' => now(),
             'pointage_kiosk_token' => bin2hex(random_bytes(24)),
             'actif' => $validated['actif'] === 'actif',
+            'is_virtual' => $isVirtual,
+            'parent_agence_id' => $isVirtual ? ($validated['parent_agence_id'] ?? null) : null,
             'chef_agence_id' => $validated['chef_agence_id'] ?? null,
             'filiale_id' => $validated['filiale_id'] ?? null,
         ]);
@@ -213,10 +228,23 @@ class PointageSiteController extends Controller
             'longitude' => ['nullable', 'required_with:latitude', 'numeric', 'between:-180,180'],
             'rayon_geofencing_metres' => 'nullable|integer|min:10|max:2000',
             'pointage_qr_type' => 'required|in:dynamic,static',
+            'is_virtual' => 'nullable|boolean',
+            'parent_agence_id' => 'nullable|integer|exists:agences,id',
+            'kiosk_serial_number' => 'nullable|string|max:128',
+            'clear_kiosk_serial' => 'nullable|boolean',
             'actif' => 'required|in:actif,inactif',
             'chef_agence_id' => 'nullable|exists:profiles,id',
             'filiale_id' => 'nullable|exists:filiales,id',
         ]);
+
+        $isVirtual = (bool) ($validated['is_virtual'] ?? $site->is_virtual);
+
+        $kioskSerial = $site->kiosk_serial_number;
+        if (! empty($validated['clear_kiosk_serial'])) {
+            $kioskSerial = null;
+        } elseif (array_key_exists('kiosk_serial_number', $validated) && $validated['kiosk_serial_number'] !== null) {
+            $kioskSerial = \App\Support\MobileDeviceId::normalize((string) $validated['kiosk_serial_number']) ?: null;
+        }
 
         $site->update([
             'nom' => $validated['nom'],
@@ -225,14 +253,86 @@ class PointageSiteController extends Controller
             'latitude' => $validated['latitude'] ?? null,
             'longitude' => $validated['longitude'] ?? null,
             'rayon_geofencing_metres' => $validated['rayon_geofencing_metres'] ?? $site->rayon_geofencing_metres,
-            'pointage_qr_type' => $validated['pointage_qr_type'],
+            'pointage_qr_type' => $isVirtual ? 'static' : $validated['pointage_qr_type'],
             'actif' => $validated['actif'] === 'actif',
+            'is_virtual' => $isVirtual,
+            'kiosk_serial_number' => $isVirtual ? $kioskSerial : null,
+            'parent_agence_id' => $isVirtual
+                ? ($validated['parent_agence_id'] ?? $site->parent_agence_id)
+                : null,
             'chef_agence_id' => $validated['chef_agence_id'] ?? null,
             'filiale_id' => $validated['filiale_id'] ?? null,
         ]);
 
         return redirect()->route('pointage.sites.index')
             ->with('success', 'Site mis à jour.');
+    }
+
+    /**
+     * Crée une agence virtuelle liée à une agence réelle (QR static, pointage par matricule).
+     */
+    public function storeVirtual(Request $request, Agence $site, AgenceEmployesEnrollementService $employesService)
+    {
+        abort_unless($site->isEnrolledForPointageQr(), 404);
+        abort_if($site->isVirtual(), 422, 'Impossible de créer une virtuelle depuis une agence déjà virtuelle.');
+
+        $validated = $request->validate([
+            'nom' => 'nullable|string|max:255|unique:agences,nom',
+            'code_agent' => 'nullable|string|max:50|unique:agences,code_agent',
+        ]);
+
+        $nom = trim((string) ($validated['nom'] ?? ''));
+        if ($nom === '') {
+            $nom = $site->nom.' — Virtuelle';
+            $base = $nom;
+            $i = 2;
+            while (Agence::query()->where('nom', $nom)->exists()) {
+                $nom = $base.' '.$i;
+                $i++;
+            }
+        }
+
+        $code = trim((string) ($validated['code_agent'] ?? ''));
+        if ($code === '') {
+            $code = mb_substr(($site->code_agent ?: 'AG').'-V'.bin2hex(random_bytes(2)), 0, 50);
+        }
+
+        $agence = Agence::create([
+            'nom' => $nom,
+            'code_agent' => $code,
+            'description' => 'Agence virtuelle (borne partagée, e-mail + OTP) liée à '.$site->nom,
+            'latitude' => $site->latitude,
+            'longitude' => $site->longitude,
+            'rayon_geofencing_metres' => $site->rayon_geofencing_metres ?? 50,
+            'pointage_qr_type' => 'static',
+            'pointage_qr_secret' => bin2hex(random_bytes(32)),
+            'pointage_qr_enrolled_at' => now(),
+            'pointage_qr_enabled' => true,
+            'pointage_kiosk_token' => bin2hex(random_bytes(24)),
+            'actif' => true,
+            'is_virtual' => true,
+            'parent_agence_id' => $site->id,
+            'chef_agence_id' => $site->chef_agence_id,
+            'filiale_id' => $site->filiale_id,
+        ]);
+
+        $employesSync = $employesService->syncEmployesEnrolesPourAgence($agence);
+
+        PointageAuditLog::record(
+            Auth::user(),
+            'QR_ENROLEMENT',
+            'Création agence virtuelle — '.$agence->nom,
+            $agence,
+            $request->ip(),
+            'ok',
+            [
+                'parent_agence_id' => $site->id,
+                'employes_synchronises' => $employesSync,
+            ]
+        );
+
+        return redirect()->route('pointage.sites.index')
+            ->with('success', 'Agence virtuelle créée : '.$agence->nom.'. QR statique prêt pour la borne.');
     }
 
     public function destroy(Agence $site)

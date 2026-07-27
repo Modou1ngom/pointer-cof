@@ -21,6 +21,8 @@ return [
     'plage_depart_debut' => env('POINTAGE_PLAGE_DEPART_DEBUT', '15:00'),
     'plage_depart_fin' => env('POINTAGE_PLAGE_DEPART_FIN', '20:00'),
     'qr_dynamic_ttl_seconds' => (int) env('POINTAGE_QR_TTL', 300),
+    /** TTL des QR static / agence virtuelle (défaut 10 ans). */
+    'qr_static_ttl_seconds' => (int) env('POINTAGE_QR_STATIC_TTL', 86400 * 365 * 10),
 
     /**
      * Jours où le QR Code est totalement désactivé (CSV de jours de la semaine,

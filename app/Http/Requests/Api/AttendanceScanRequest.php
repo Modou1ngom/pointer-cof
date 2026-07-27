@@ -20,7 +20,20 @@ class AttendanceScanRequest extends FormRequest
         $this->mergeSnakeFromCamelPairs([
             ['qr_payload', 'qrPayload'],
             ['qr_token', 'qrToken'],
+            ['device_id', 'deviceId'],
+            ['serial_number', 'serialNumber'],
         ]);
+
+        if ($this->filled('device_id')) {
+            $this->merge([
+                'device_id' => \App\Support\MobileDeviceId::normalize((string) $this->input('device_id')),
+            ]);
+        }
+        if ($this->filled('serial_number')) {
+            $this->merge([
+                'serial_number' => \App\Support\MobileDeviceId::normalize((string) $this->input('serial_number')),
+            ]);
+        }
 
         $raw = (string) ($this->input('qr_payload') ?? $this->input('qr_token') ?? '');
         if ($raw !== '') {
@@ -40,6 +53,8 @@ class AttendanceScanRequest extends FormRequest
             'qr_payload' => ['required', 'string', 'min:8', 'max:2048'],
             'latitude' => ['required', 'numeric', 'between:-90,90'],
             'longitude' => ['required', 'numeric', 'between:-180,180'],
+            'device_id' => ['nullable', 'string', 'max:128'],
+            'serial_number' => ['nullable', 'string', 'max:128'],
         ];
     }
 

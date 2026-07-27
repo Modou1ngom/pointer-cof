@@ -30,6 +30,21 @@ final class PointageGeofencing
             return ['ok' => true];
         }
 
+        // Agence virtuelle (borne partagée) : pas de contrainte GPS sur le téléphone employé.
+        if ($agence->isVirtual()) {
+            return [
+                'ok' => true,
+                'distance_metres' => null,
+                'rayon_autorise_metres' => null,
+                'site_latitude' => $agence->latitude !== null ? (float) $agence->latitude : null,
+                'site_longitude' => $agence->longitude !== null ? (float) $agence->longitude : null,
+                'scan_latitude' => $latitude,
+                'scan_longitude' => $longitude,
+                'agence_nom' => $agence->nom,
+                'virtual_skip' => true,
+            ];
+        }
+
         if ($agence->latitude === null || $agence->longitude === null) {
             return [
                 'ok' => false,
