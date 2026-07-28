@@ -7,6 +7,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import ActionsQrMenu from '@/components/pointage/ActionsQrMenu.vue';
 import PointageLayout from '@/layouts/pointage/PointageLayout.vue';
 import type { BreadcrumbItem } from '@/types';
 import { Link, router } from '@inertiajs/vue3';
@@ -33,6 +34,7 @@ interface Agence {
     is_enrolled?: boolean;
     is_virtual?: boolean;
     parent_agence_id?: number | null;
+    kiosk_serial_number?: string | null;
     kiosk_url?: string | null;
 }
 
@@ -451,6 +453,64 @@ function createVirtual(a: Agence) {
     router.post(`/pointage/sites/${a.id}/creer-virtuelle`, {}, { preserveScroll: true });
 }
 
+const kioskSerialDialogOpen = ref(false);
+const kioskSerialAgence = ref<Agence | null>(null);
+const kioskSerialDraft = ref('');
+const kioskSerialSaving = ref(false);
+
+function openKioskSerialDialog(a: Agence) {
+    if (!a.is_virtual) return;
+    kioskSerialAgence.value = a;
+    kioskSerialDraft.value = a.kiosk_serial_number ?? '';
+    kioskSerialDialogOpen.value = true;
+}
+
+function clearKioskSerial() {
+    const a = kioskSerialAgence.value;
+    if (!a) return;
+    if (
+        !confirm(
+            `Libérer le téléphone borne de « ${a.nom} » ?\nLe prochain scan depuis un autre appareil enregistrera le nouveau n° de série.`,
+        )
+    ) {
+        return;
+    }
+    kioskSerialSaving.value = true;
+    router.post(
+        `/pointage/sites/${a.id}/kiosk-serial`,
+        { clear: true },
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                kioskSerialSaving.value = false;
+                kioskSerialDialogOpen.value = false;
+            },
+        },
+    );
+}
+
+function saveKioskSerial() {
+    const a = kioskSerialAgence.value;
+    if (!a) return;
+    const serial = kioskSerialDraft.value.trim();
+    if (!serial) {
+        alert('Saisissez un n° de série, ou utilisez « Libérer le téléphone ».');
+        return;
+    }
+    kioskSerialSaving.value = true;
+    router.post(
+        `/pointage/sites/${a.id}/kiosk-serial`,
+        { kiosk_serial_number: serial },
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                kioskSerialSaving.value = false;
+                kioskSerialDialogOpen.value = false;
+            },
+        },
+    );
+}
+
 async function toggleQrPause(a: Agence) {
     const qrActif = a.pointage_qr_enabled !== false && a.actif;
     if (qrActif) {
@@ -515,9 +575,6 @@ function regenAll() {
 function scrollToQr(id: number) {
     document.getElementById(`qr-card-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
-
-const disclaimerQr =
-    'Aperçu admin du jeton site. Pour le pointage sur place : ouvrez « Tablette » (écran borne) — les employés scannent avec CofiPointe. Le flux web « Pointer » reste le QR personnel + OTP.';
 </script>
 
 <template>
@@ -526,12 +583,6 @@ const disclaimerQr =
             <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                     <h1 class="text-xl font-semibold text-[#0C447C]">Génération QR Code par agence</h1>
-                    <p class="mt-2 max-w-3xl text-sm leading-relaxed text-[#5c5a57]">
-                        Seules les agences <strong class="font-semibold">enrôlées au pointage QR</strong> apparaissent dans le
-                        tableau ci-dessous. Les agences créées dans le menu « Agences » ne sont pas listées tant qu’elles n’ont
-                        pas été enrôlées via « Génération QR Code » (recherche par code) ou « Nouveau site / agence » (création
-                        directe dans ce module).
-                    </p>
                     <div class="mt-4 flex flex-wrap items-center gap-3">
                         <button
                             type="button"
@@ -575,14 +626,65 @@ const disclaimerQr =
                 </div>
             </div>
 
+            <Dialog v-model:open="kioskSerialDialogOpen">
+                <DialogContent class="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Téléphone borne — {{ kioskSerialAgence?.nom }}</DialogTitle>
+                        <DialogDescription class="sr-only">Paramétrage du téléphone borne</DialogDescription>
+                    </DialogHeader>
+                    <div class="space-y-3 py-2">
+                        <div>
+                            <label class="text-[11px] font-bold uppercase text-[#888780]">N° de série actuel</label>
+                            <p class="mt-1 rounded-md border border-[#e2e0d8] bg-[#FAFAF8] px-3 py-2 font-mono text-sm text-[#0C447C]">
+                                {{ kioskSerialAgence?.kiosk_serial_number || 'Aucun' }}
+                            </p>
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-bold uppercase text-[#888780]">Nouveau n° de série</label>
+                            <input
+                                v-model="kioskSerialDraft"
+                                type="text"
+                                class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 font-mono text-sm"
+                                placeholder="N° de série"
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter class="flex flex-wrap gap-2 sm:justify-between">
+                        <button
+                            type="button"
+                            class="rounded-md border border-[#F5C1C1] bg-white px-3 py-2 text-sm font-medium text-[#A32D2D] hover:bg-[#FCEBEB] disabled:opacity-50"
+                            :disabled="kioskSerialSaving || !kioskSerialAgence?.kiosk_serial_number"
+                            @click="clearKioskSerial"
+                        >
+                            Libérer le téléphone
+                        </button>
+                        <div class="flex gap-2">
+                            <button
+                                type="button"
+                                class="rounded-md border border-[#e2e0d8] px-3 py-2 text-sm text-[#0C447C]"
+                                :disabled="kioskSerialSaving"
+                                @click="kioskSerialDialogOpen = false"
+                            >
+                                Fermer
+                            </button>
+                            <button
+                                type="button"
+                                class="rounded-md bg-[#185FA5] px-3 py-2 text-sm font-semibold text-white hover:bg-[#0C447C] disabled:opacity-50"
+                                :disabled="kioskSerialSaving"
+                                @click="saveKioskSerial"
+                            >
+                                {{ kioskSerialSaving ? '…' : 'Enregistrer' }}
+                            </button>
+                        </div>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <Dialog v-model:open="rayonDialogOpen">
                 <DialogContent class="max-h-[90vh] max-w-lg overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Paramétrage du rayon GPS</DialogTitle>
-                        <DialogDescription>
-                            Distance maximale (en mètres) entre le téléphone et le site pour autoriser le pointage.
-                            Min. 10 m — max. 2000 m.
-                        </DialogDescription>
+                        <DialogDescription class="sr-only">Paramétrage du rayon GPS</DialogDescription>
                     </DialogHeader>
                     <div class="flex flex-wrap gap-2 py-1">
                         <button
@@ -654,9 +756,7 @@ const disclaimerQr =
                 <DialogContent class="max-h-[90vh] max-w-2xl overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Génération QR Code par agence</DialogTitle>
-                        <DialogDescription>
-                            Saisissez le code agence, puis validez pour afficher les informations et paramétrer le QR.
-                        </DialogDescription>
+                        <DialogDescription class="sr-only">Génération QR Code par agence</DialogDescription>
                     </DialogHeader>
 
                     <div v-if="wizardStep === 'code'" class="space-y-4 py-2">
@@ -675,15 +775,8 @@ const disclaimerQr =
                     </div>
 
                     <div v-else-if="wizardStep === 'detail' && selectedAgence" class="space-y-5 py-2">
-                        <p
-                            v-if="!selectedAgence.is_enrolled"
-                            class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
-                        >
-                            Cette agence existe dans le référentiel mais n’est pas encore enrôlée au pointage. Cliquez sur
-                            « Générer QR Code » pour finaliser l’enrôlement et l’afficher dans la liste.
-                        </p>
                         <div class="rounded-lg border border-[#e2e0d8] bg-[#FAFAF8] p-4">
-                            <h3 class="text-[11px] font-bold uppercase tracking-wide text-[#888780]">Informations affichées automatiquement</h3>
+                            <h3 class="text-[11px] font-bold uppercase tracking-wide text-[#888780]">Informations</h3>
                             <dl class="mt-3 grid gap-2 text-sm text-[#0C447C] sm:grid-cols-2">
                                 <div><dt class="text-[#888780]">Code agence</dt> <dd class="font-mono font-semibold">{{ selectedAgence.code_agent ?? '—' }}</dd></div>
                                 <div><dt class="text-[#888780]">Nom agence</dt> <dd class="font-semibold">{{ selectedAgence.nom }}</dd></div>
@@ -697,7 +790,7 @@ const disclaimerQr =
                         </div>
 
                         <div class="space-y-3 rounded-lg border border-[#e2e0d8] bg-white p-4">
-                            <h3 class="text-[11px] font-bold uppercase tracking-wide text-[#888780]">Informations complémentaires à renseigner</h3>
+                            <h3 class="text-[11px] font-bold uppercase tracking-wide text-[#888780]">Paramètres QR</h3>
                             <div class="grid gap-3 sm:grid-cols-2">
                                 <div>
                                     <label class="text-[10px] font-bold uppercase text-[#888780]" for="qr-act">Date d’activation du QR Code</label>
@@ -763,7 +856,6 @@ const disclaimerQr =
                         </div>
 
                         <div class="flex flex-col items-center gap-3 rounded-lg border border-[#e2e0d8] bg-white p-4">
-                            <p class="text-xs text-[#888780]">Aperçu du jeton (après génération / recherche)</p>
                             <div class="flex h-56 w-56 items-center justify-center rounded-lg bg-[#FAFAF8]">
                                 <img v-if="wizardQrDataUrl" :src="wizardQrDataUrl" alt="QR Code" class="h-52 w-52 rounded-md bg-white p-1" />
                                 <QrCodeIcon v-else class="h-16 w-16 text-[#e2e0d8]" />
@@ -885,7 +977,7 @@ const disclaimerQr =
                                 <th class="px-4 py-3 text-center">Geofencing</th>
                                 <th class="px-4 py-3 text-center">QR type</th>
                                 <th class="px-4 py-3 text-center">Statut QR</th>
-                                <th class="px-4 py-3 text-right" title="Éditer, voir, régénérer ou mettre en pause le QR Code">
+                                <th class="px-4 py-3 text-right" title="Actions QR du site">
                                     Actions QR
                                 </th>
                         </tr>
@@ -901,6 +993,20 @@ const disclaimerQr =
                                             class="rounded-full bg-[#FFF3D0] px-2 py-0.5 text-[10px] font-bold uppercase text-[#854F0B]"
                                         >
                                             Virtuelle
+                                        </span>
+                                        <span
+                                            v-if="a.is_virtual && a.kiosk_serial_number"
+                                            class="rounded-full bg-[#E6F1FB] px-2 py-0.5 text-[10px] font-semibold text-[#185FA5]"
+                                            :title="'Téléphone borne : ' + a.kiosk_serial_number"
+                                        >
+                                            Tél. lié
+                                        </span>
+                                        <span
+                                            v-else-if="a.is_virtual"
+                                            class="rounded-full bg-[#F1EFE8] px-2 py-0.5 text-[10px] font-semibold text-[#888780]"
+                                            title="Aucun téléphone enregistré — le prochain scan liera l’appareil"
+                                        >
+                                            Tél. libre
                                         </span>
                                     </span>
                                 </td>
@@ -938,104 +1044,26 @@ const disclaimerQr =
                                     </span>
                                 </td>
                                 <td class="px-4 py-3 text-right">
-                                    <div class="flex flex-wrap justify-end gap-x-3 gap-y-1 text-xs font-medium">
-                                        <button
-                                            type="button"
-                                            class="text-[#185FA5] underline hover:no-underline"
-                                            title="Modifier les paramètres du QR Code"
-                                            @click="openQrWizardForAgence(a)"
-                                        >
-                                            Éditer QR
-                                        </button>
-                                        <span class="text-[#e2e0d8]" aria-hidden="true">·</span>
-                                        <Link
-                                            :href="`/pointage/sites/${a.id}/edit`"
-                                            class="text-[#0C447C] underline hover:no-underline"
-                                            title="Modifier le site (GPS, rayon…)"
-                                        >
-                                            Site
-                                        </Link>
-                                        <template v-if="!a.is_virtual">
-                                            <span class="text-[#e2e0d8]" aria-hidden="true">·</span>
-                                            <button
-                                                type="button"
-                                                class="text-[#27500A] underline hover:no-underline"
-                                                title="Créer une agence virtuelle liée (borne + e-mail OTP)"
-                                                @click="createVirtual(a)"
-                                            >
-                                                + Virtuelle
-                                            </button>
-                                        </template>
-                                        <span class="text-[#e2e0d8]" aria-hidden="true">·</span>
-                                        <button
-                                            type="button"
-                                            class="text-[#854F0B] underline hover:no-underline"
-                                            title="Afficher l’aperçu du QR en bas de page"
-                                            @click="scrollToQr(a.id)"
-                                        >
-                                            Voir QR
-                                        </button>
-                                        <span class="text-[#e2e0d8]" aria-hidden="true">·</span>
-                                        <button
-                                            type="button"
-                                            class="text-[#0C447C] underline hover:no-underline"
-                                            title="Ouvrir l’écran borne / tablette (plein écran)"
-                                            :disabled="!a.kiosk_url"
-                                            @click="openKiosk(a)"
-                                        >
-                                            Tablette
-                                        </button>
-                                        <span class="text-[#e2e0d8]" aria-hidden="true">·</span>
-                                        <button
-                                            type="button"
-                                            class="text-[#185FA5] underline hover:no-underline"
-                                            title="Copier l’URL à coller sur la tablette"
-                                            :disabled="!a.kiosk_url"
-                                            @click="copyKioskUrl(a)"
-                                        >
-                                            Copier lien
-                                        </button>
-                                        <span class="text-[#e2e0d8]" aria-hidden="true">·</span>
-                                        <button
-                                            type="button"
-                                            class="text-[#185FA5] underline hover:no-underline"
-                                            title="Régénérer un nouveau jeton QR"
-                                            @click="regenOne(a.id)"
-                                        >
-                                            Régénérer QR
-                                        </button>
-                                        <span class="text-[#e2e0d8]" aria-hidden="true">·</span>
-                                        <button
-                                            type="button"
-                                            class="underline hover:no-underline"
-                                            :class="
-                                                a.actif && a.pointage_qr_enabled !== false
-                                                    ? 'text-[#A32D2D]'
-                                                    : 'text-[#3B6D11]'
-                                            "
-                                            :title="
-                                                a.actif && a.pointage_qr_enabled !== false
-                                                    ? 'Désactiver temporairement le QR Code'
-                                                    : 'Réactiver le QR Code'
-                                            "
-                                            @click="toggleQrPause(a)"
-                                        >
-                                            {{
-                                                a.actif && a.pointage_qr_enabled !== false ? 'Pause QR' : 'Activer QR'
-                                            }}
-                                        </button>
-                                    </div>
-                            </td>
+                                    <ActionsQrMenu
+                                        :site="a"
+                                        @voir-qr="scrollToQr(a.id)"
+                                        @edit-qr="openQrWizardForAgence(a)"
+                                        @copy-link="copyKioskUrl(a)"
+                                        @create-virtual="createVirtual(a)"
+                                        @open-kiosk="openKiosk(a)"
+                                        @regen-qr="regenOne(a.id)"
+                                        @toggle-pause="toggleQrPause(a)"
+                                        @open-kiosk-serial="openKioskSerialDialog(a)"
+                                    />
+                                </td>
                             </tr>
                             <tr v-if="!agences.data?.length">
                                 <td colspan="9" class="px-4 py-12 text-center text-[#888780]">
                                     <template v-if="filters.code_agence">
-                                        Aucun site ne correspond à ce critère. Vérifiez le code agence ou
-                                        <Link href="/pointage/sites/create" class="font-medium text-[#185FA5] underline">créez un nouveau site</Link>.
+                                        Aucun site ne correspond à ce critère.
                                     </template>
                                     <template v-else>
-                                        Aucune agence enrôlée au pointage QR. Utilisez « Génération QR Code » pour enrôler une
-                                        agence existante (menu Agences) ou « Nouveau site / agence ».
+                                        Aucune agence enrôlée au pointage QR.
                                     </template>
                             </td>
                         </tr>
@@ -1069,7 +1097,6 @@ const disclaimerQr =
 
             <div>
                 <h2 class="mb-4 text-sm font-semibold uppercase tracking-wide text-[#888780]">Aperçu QR par site</h2>
-                <p class="mb-4 text-xs text-[#888780]">{{ disclaimerQr }}</p>
                 <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <div
                         v-for="a in agences.data"
@@ -1116,10 +1143,16 @@ const disclaimerQr =
                             >
                                 Nouveau lien
                             </button>
+                            <button
+                                v-if="a.is_virtual"
+                                type="button"
+                                class="rounded-md border border-[#F5C1C1] px-2.5 py-1.5 text-[11px] font-medium text-[#854F0B] hover:bg-[#FFF8E7]"
+                                title="Paramétrer / libérer le téléphone borne"
+                                @click="openKioskSerialDialog(a)"
+                            >
+                                Téléphone borne
+                            </button>
                         </div>
-                        <p class="mt-2 text-[10px] leading-snug text-[#888780]">
-                            Sur Android : ouvrir le lien → « Plein écran » → épingler l’écran (ou Fully Kiosk).
-                        </p>
                     </div>
                 </div>
             </div>

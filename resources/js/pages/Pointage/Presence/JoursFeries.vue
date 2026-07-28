@@ -231,9 +231,6 @@ function toggleDeptClone(id: number, checked: boolean) {
             <div class="flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h1 class="text-xl font-semibold text-[#0C447C]">Jours fériés</h1>
-                    <p class="mt-1 text-sm text-[#5c5a57]">
-                        Import officiel (Nager.date) + saisie manuelle. Les absences un jour férié chômé ne comptent pas comme absence.
-                    </p>
                 </div>
                 <Link href="/pointage/rh/presence/jours-feries-calendrier" class="text-sm font-semibold text-[#185FA5] underline">Vue calendrier</Link>
             </div>
@@ -244,7 +241,6 @@ function toggleDeptClone(id: number, checked: boolean) {
             <!-- PARTIE 1 — Import Nager -->
             <section class="rounded-xl border border-[#e2e0d8] bg-white p-4 shadow-sm">
                 <h2 class="text-sm font-semibold text-[#0C447C]">Import automatique (API officielle)</h2>
-                <p class="mt-1 text-xs text-[#888780]">Source : date.nager.at — en cas d’erreur, utilisez la saisie manuelle ci-dessous.</p>
                 <div class="mt-4 flex flex-wrap items-end gap-3">
                     <div>
                         <label class="text-[11px] font-bold uppercase text-[#888780]">Pays</label>
@@ -481,7 +477,6 @@ function toggleDeptClone(id: number, checked: boolean) {
             <div v-if="cloneId !== null" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="cloneId = null">
                 <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
                     <h2 class="text-lg font-semibold text-[#0C447C]">Cloner vers départements</h2>
-                    <p class="mt-1 text-xs text-[#888780]">Comme « Clone to Areas » : copie le férié vers les départements cochés.</p>
                     <ul class="mt-4 max-h-48 space-y-2 overflow-y-auto">
                         <li v-for="d in departements" :key="'cl-' + d.id">
                             <label class="flex cursor-pointer items-center gap-2 text-sm">

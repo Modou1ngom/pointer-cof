@@ -131,9 +131,7 @@ function typeBadgeClass(type: string): string {
             <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                     <h1 class="text-xl font-semibold text-[#0C447C]">Récupération des pointages</h1>
-                    <p class="mt-1 text-sm text-[#888780]">
-                        Consultation des pointages bruts (arrivées / départs) sur une période — {{ periode_label }}
-                    </p>
+                    <p class="mt-1 text-sm text-[#888780]">{{ periode_label }}</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
                     <Link
@@ -360,11 +358,6 @@ function typeBadgeClass(type: string): string {
                     </template>
                 </div>
             </div>
-
-            <p class="text-center text-xs text-[#888780]">
-                Chaque ligne = un pointage enregistré (arrivée ou départ). Pour la vue par employé et par jour, utilisez la
-                <Link href="/pointage/rh/tous-pointages" class="font-medium text-[#185FA5] underline">synthèse journalière</Link>.
-            </p>
         </div>
     </PointageLayout>
 </template>

@@ -109,11 +109,6 @@ function submitPlages() {
             <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h1 class="text-xl font-semibold text-[#0C447C]">Gestion des Horaires</h1>
-                    <p class="mt-1 max-w-3xl text-sm text-[#5c5a57]">
-                        Création des horaires de travail (référence globale) : heures prévues, plages de scan
-                        arrivée/départ, heures ajustées pour le reporting, tolérances. Les heures réelles de pointage
-                        restent disponibles dans l’historique pour audit.
-                    </p>
                 </div>
                 <button
                     type="submit"
@@ -129,12 +124,6 @@ function submitPlages() {
                 <!-- Horaires -->
                 <div id="gestion-horaires" class="rounded-[10px] border border-[#e2e0d8] bg-white p-5 shadow-sm">
                     <h2 class="border-b border-[#e2e0d8] pb-3 text-sm font-semibold text-[#0C447C]">Horaires prévus &amp; ajustés</h2>
-                    <p id="creation-horaires" class="mt-2 text-xs leading-relaxed text-[#5c5a57]">
-                        <strong class="text-[#0C447C]">Heures ajustées :</strong> référence utilisée pour le calcul du
-                        temps de présence et du temps de travail. Si un collaborateur arrive dans la plage autorisée ou
-                        quitte selon les règles paramétrées, le système retient l’heure ajustée pour le reporting tout en
-                        conservant l’heure réelle de pointage en historique.
-                    </p>
                     <div class="mt-4 space-y-4">
                         <div>
                             <label class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#888780]" for="heure-arrivee">
@@ -204,11 +193,6 @@ function submitPlages() {
                             <div class="flex items-start justify-between gap-3">
                                 <div>
                                     <p class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Plages de pointage (scan)</p>
-                                    <p class="mt-1 text-xs leading-relaxed text-[#5c5a57]">
-                                        Hors de ces plages, le pointage est refusé. L’heure courante décide si c’est une
-                                        <strong class="text-[#0C447C]">arrivée</strong> ou un
-                                        <strong class="text-[#0C447C]">départ</strong>.
-                                    </p>
                                 </div>
                                 <button
                                     type="button"
@@ -422,11 +406,6 @@ function submitPlages() {
 
             <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-5 shadow-sm">
                 <h2 class="border-b border-[#e2e0d8] pb-3 text-sm font-semibold text-[#0C447C]">Export fiche horaires (Excel)</h2>
-                <p class="mt-2 text-xs leading-relaxed text-[#5c5a57]">
-                    Génère une fiche au format du modèle RH : heures réelles de pointage, heures ajustées selon les
-                    tolérances configurées ci-dessus, totaux et journée standard (
-                    {{ config.base_heures_jour_reference }} h) lorsque l’arrivée et le départ respectent les règles.
-                </p>
                 <div class="mt-4 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
                     <div class="min-w-[10rem] flex-1">
                         <label class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-[#888780]" for="export-mois">Mois</label>

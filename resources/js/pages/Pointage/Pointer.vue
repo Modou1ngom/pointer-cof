@@ -221,10 +221,6 @@ function submitPointage() {
                     <p v-if="qrGenError" class="text-sm text-[#A32D2D]">{{ qrGenError }}</p>
                     <div v-else-if="qrDataUrl" class="flex flex-col items-center gap-2">
                         <img :src="qrDataUrl" alt="QR code pointage" class="rounded-lg border border-[#e2e0d8] bg-white p-2 shadow-sm" />
-                        <p class="max-w-xs text-xs text-[#888780]">
-                            Ce QR est lié à <strong>votre session</strong>, à votre <strong>e-mail</strong> et au
-                            <strong>téléphone professionnel</strong> enregistré sur votre fiche — un autre compte ne peut pas l’utiliser.
-                        </p>
                     </div>
                     <div v-else class="py-8 text-sm text-[#888780]">Chargement du QR…</div>
                     <button
@@ -239,10 +235,6 @@ function submitPointage() {
 
                 <div v-else-if="step === 1" class="space-y-3">
                     <p class="text-sm font-medium text-[#0C447C]">Vérification par e-mail et SMS</p>
-                    <p class="text-xs text-[#888780]">
-                        Un <strong>code à 6 chiffres identique</strong> est envoyé sur votre adresse professionnelle et sur votre mobile, afin
-                        de confirmer que les coordonnées correspondent bien à votre compte avant le GPS et la biométrie.
-                    </p>
                     <div v-if="contact_hints" class="rounded-md border border-[#e2e0d8] bg-[#FAFAF8] px-3 py-2 text-xs text-[#57534E]">
                         <div><span class="text-[#888780]">E-mail :</span> {{ contact_hints.email_masked }}</div>
                         <div class="mt-1"><span class="text-[#888780]">Téléphone :</span> {{ contact_hints.phone_masked }}</div>
@@ -295,11 +287,6 @@ function submitPointage() {
                         </button>
                     </div>
                     <p v-if="otpInfo" class="text-xs text-[#166534]">{{ otpInfo }}</p>
-                    <p class="text-[11px] text-[#888780]">
-                        En environnement de démo, le SMS apparaît dans les
-                        <code class="rounded bg-[#F1EFE8] px-1">storage/logs/laravel.log</code>
-                        . Vous pouvez valider avec la touche Entrée dans le champ code.
-                    </p>
                     <button type="button" class="w-full text-xs text-[#185FA5] underline" @click="skipOtpWithPin">
                         Secours : passer au GPS et utiliser PIN / 4 derniers chiffres à l’enregistrement
                     </button>
@@ -307,10 +294,6 @@ function submitPointage() {
 
                 <div v-else-if="step === 2" class="space-y-3">
                     <p class="text-sm font-medium">Vérification GPS</p>
-                    <p class="text-xs text-[#888780]">
-                        La position est lue automatiquement sur cet appareil (GPS activé). Elle est comparée au site
-                        « {{ agence.nom }} » — aucune saisie manuelle de latitude / longitude.
-                    </p>
                     <p v-if="gpsLoading" class="text-sm text-[#185FA5]">Acquisition de la position GPS en cours…</p>
                     <p v-if="geoError" class="text-sm text-[#A32D2D]">{{ geoError }}</p>
                     <div
@@ -331,9 +314,6 @@ function submitPointage() {
 
                 <div v-else-if="step === 3" class="space-y-3 text-center">
                     <p class="text-sm font-medium">Face ID / empreinte digitale</p>
-                    <p class="text-xs text-[#888780]">
-                        Sur appareil compatible, utilisez la biométrie locale ; ici, touchez pour simuler la confirmation.
-                    </p>
                     <button
                         type="button"
                         class="mx-auto flex h-24 w-24 items-center justify-center rounded-full border-2 border-dashed border-[#185FA5] bg-[#E6F1FB] text-3xl"
@@ -348,7 +328,6 @@ function submitPointage() {
                     <p class="font-semibold text-[#3B6D11]">Prêt à enregistrer</p>
                     <div v-if="!form.otp_session_token" class="rounded-md border border-[#FAC775] bg-[#FAEEDA] px-3 py-2 text-left text-xs text-[#633806]">
                         <p class="font-medium">Secours — code OTP non validé</p>
-                        <p class="mt-1">Saisissez votre PIN pointage ou les <strong>4 derniers chiffres</strong> du téléphone professionnel.</p>
                         <input
                             v-model="form.unlock_code"
                             type="password"
@@ -359,13 +338,6 @@ function submitPointage() {
                             placeholder="PIN ou 4 chiffres"
                         />
                     </div>
-                    <p class="rounded-md border border-[#B5D4F4] bg-[#E6F1FB] px-3 py-2 text-left text-xs text-[#0C447C]">
-                        Le type est détecté automatiquement selon l’heure :
-                        <strong>arrivée</strong> {{ plagesInfo.arrivee }},
-                        <strong>départ</strong> {{ plagesInfo.depart }}.
-                        L’heure enregistrée est l’heure <strong>ajustée</strong> si vous êtes dans les tolérances RH,
-                        sinon l’heure réelle du pointage.
-                    </p>
                     <button
                         type="button"
                         :disabled="

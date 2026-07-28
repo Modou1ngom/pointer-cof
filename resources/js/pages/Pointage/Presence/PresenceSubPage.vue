@@ -29,11 +29,6 @@ const breadcrumbs = computed<BreadcrumbItem[]>(() => {
         <div class="mx-auto max-w-3xl space-y-6">
             <div>
                 <h1 class="text-xl font-semibold text-[#0C447C]">{{ props.heading }}</h1>
-                <p class="mt-2 text-sm leading-relaxed text-[#5c5a57]">{{ props.description }}</p>
-            </div>
-            <div class="rounded-xl border border-[#e2e0d8] bg-[#E6F1FB] px-4 py-3 text-xs text-[#0C447C]">
-                Écran de paramétrage : les formulaires et enregistrements seront branchés sur les données métier dans une
-                prochaine itération.
             </div>
             <Link href="/pointage/rh/parametrage" class="text-sm font-medium text-[#185FA5] underline hover:no-underline">
                 Paramétrage RH (horaires &amp; tolérances)

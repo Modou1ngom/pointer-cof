@@ -7,9 +7,11 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import ActionIconButton from '@/components/pointage/ActionIconButton.vue';
 import PointageLayout from '@/layouts/pointage/PointageLayout.vue';
 import type { BreadcrumbItem } from '@/types';
 import { Link, router, usePage } from '@inertiajs/vue3';
+import { Eye, PauseCircle, Pencil, PlayCircle } from 'lucide-vue-next';
 import { computed, reactive, ref, watch } from 'vue';
 import { readCsrfTokenFromDom } from '@/lib/csrf';
 
@@ -870,9 +872,6 @@ async function definirPrincipale(a: AgenceAutorisee) {
             <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h1 class="text-xl font-semibold text-[#0C447C]">Affectation des services/agences</h1>
-                    <p class="mt-2 max-w-3xl text-sm leading-relaxed text-[#5c5a57]">
-                        Créez le profil et le compte utilisateur, puis enrôlez le collaborateur au pointage (agences et paramètres).
-                    </p>
                 </div>
                 <div class="flex flex-wrap gap-2">
                     <button
@@ -896,9 +895,7 @@ async function definirPrincipale(a: AgenceAutorisee) {
                 <DialogContent class="max-h-[92vh] max-w-4xl overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Création profil et compte utilisateur</DialogTitle>
-                        <DialogDescription>
-                            Renseignez la fiche collaborateur et le compte de connexion. Le rôle pourra être défini ensuite depuis la fiche profil.
-                        </DialogDescription>
+                        <DialogDescription class="sr-only">Création profil et compte utilisateur</DialogDescription>
                     </DialogHeader>
                     <div class="space-y-4 py-2">
                         <div class="grid gap-3 sm:grid-cols-2">
@@ -1033,13 +1030,15 @@ async function definirPrincipale(a: AgenceAutorisee) {
                                       : 'Enrôlement — Recherche collaborateur'
                             }}
                         </DialogTitle>
-                        <DialogDescription v-if="!enrollmentModalReadOnly && !profilVue">
-                            Recherchez le collaborateur par e-mail pour configurer son affectation pointage.
+                        <DialogDescription class="sr-only">
+                            {{
+                                enrollmentModalReadOnly
+                                    ? 'Consultation — Affectation pointage'
+                                    : profilVue
+                                      ? 'Enrôlement — Affectation pointage'
+                                      : 'Enrôlement — Recherche collaborateur'
+                            }}
                         </DialogDescription>
-                        <DialogDescription v-else-if="!enrollmentModalReadOnly && profilVue">
-                            Paramétrez l’affectation pointage du collaborateur, puis confirmez l’enrôlement.
-                        </DialogDescription>
-                        <DialogDescription v-else> Affichage des informations d’enregistrement au pointage (lecture seule). </DialogDescription>
                     </DialogHeader>
 
                     <div class="space-y-4 py-2">
@@ -1108,18 +1107,12 @@ async function definirPrincipale(a: AgenceAutorisee) {
                             <p v-else-if="alreadyEnrolled" class="rounded-md border border-[#C0DD97] bg-[#EAF3DE] px-3 py-2 text-sm text-[#27500A]">
                                 Collaborateur déjà enrôlé au pointage — vous pouvez modifier son affectation ci-dessous.
                             </p>
-                            <p v-else-if="profilVue" class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                                Profil trouvé : renseignez les paramètres ci-dessous, puis cliquez sur « Confirmer l’enrôlement ».
-                            </p>
                             <p v-if="!userVue && alreadyEnrolled && !enrollmentModalReadOnly" class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                                 Aucun compte utilisateur avec cet e-mail : les agences autorisées nécessitent un compte de connexion au même e-mail.
                             </p>
 
                             <div class="rounded-lg border border-[#e2e0d8] bg-white p-4">
                                 <h3 class="text-[11px] font-bold uppercase text-[#888780]">Informations complémentaires à renseigner</h3>
-                                <p v-if="!alreadyEnrolled && !enrollmentModalReadOnly" class="mt-1 text-xs text-[#5c5a57]">
-                                    À compléter avant l’enrôlement ; enregistrés lors de la confirmation.
-                                </p>
                                 <div v-if="modaleLectureSeule" class="mt-3 grid gap-2 text-sm text-[#0C447C] sm:grid-cols-2">
                                     <div><span class="text-[#888780]">Type de pointage</span> — {{ libelleOption(type_pointage_options, paramForm.type_pointage) }}</div>
                                     <div><span class="text-[#888780]">Mode de validation</span> — {{ libelleOption(mode_validation_options, paramForm.mode_validation) }}</div>
@@ -1173,17 +1166,6 @@ async function definirPrincipale(a: AgenceAutorisee) {
 
                             <div class="rounded-lg border border-[#e2e0d8] bg-white p-4">
                                 <h3 class="text-[11px] font-bold uppercase text-[#888780]">Affectation des agences autorisées</h3>
-                                <p class="mt-1 text-xs text-[#5c5a57]">
-                                    Le tableau principal liste <strong class="font-semibold">un collaborateur par ligne</strong> ; les agences ci-dessous sont le détail du pointage. La colonne « Agence » indique l’agence
-                                    marquée <strong class="font-semibold">Principale</strong> (sinon la première par ordre alphabétique), ou à défaut l’agence du profil collaborateur.
-                                </p>
-                                <p class="mt-1 text-xs text-[#5c5a57]">
-                                    Ajouter / supprimer / modifier les droits, définir l’agence principale. Chaque ligne : code
-                                    et nom d’agence, dates d’autorisation, statut, niveau d’accès.
-                                </p>
-                                <p v-if="!alreadyEnrolled && !enrollmentModalReadOnly" class="mt-2 text-xs text-[#5c5a57]">
-                                    Agences propres au pointage : elles seront enregistrées à la confirmation de l’enrôlement.
-                                </p>
 
                                 <div
                                     v-if="!modaleLectureSeule"
@@ -1396,11 +1378,31 @@ async function definirPrincipale(a: AgenceAutorisee) {
                                     </span>
                                 </td>
                                 <td class="px-4 py-3 text-right">
-                                    <button type="button" class="text-sm font-medium text-[#185FA5] underline" @click="openAffectation(a.id, true)">Voir</button>
-                                    <button type="button" class="ml-2 text-sm font-medium text-[#185FA5] underline" @click="openAffectation(a.id, false)">Éditer</button>
-                                    <button type="button" class="ml-2 text-sm font-medium text-[#854F0B] underline" @click="toggleStatutAffectation(a)">
-                                        {{ a.statut_activation ? 'Désactiver' : 'Activer' }}
-                                    </button>
+                                    <div class="inline-flex items-center justify-end gap-0.5">
+                                        <ActionIconButton
+                                            title="Voir"
+                                            @click="openAffectation(a.id, true)"
+                                        >
+                                            <Eye class="h-4 w-4" />
+                                        </ActionIconButton>
+                                        <ActionIconButton
+                                            title="Éditer"
+                                            @click="openAffectation(a.id, false)"
+                                        >
+                                            <Pencil class="h-4 w-4" />
+                                        </ActionIconButton>
+                                        <ActionIconButton
+                                            :title="a.statut_activation ? 'Désactiver' : 'Activer'"
+                                            :variant="a.statut_activation ? 'danger' : 'success'"
+                                            @click="toggleStatutAffectation(a)"
+                                        >
+                                            <PauseCircle
+                                                v-if="a.statut_activation"
+                                                class="h-4 w-4"
+                                            />
+                                            <PlayCircle v-else class="h-4 w-4" />
+                                        </ActionIconButton>
+                                    </div>
                                 </td>
                             </tr>
                             <tr v-if="!affectations.data?.length">

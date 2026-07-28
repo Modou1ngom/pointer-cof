@@ -206,13 +206,6 @@ function statutBadgeClass(statut: string): string {
                     </template>
                 </div>
             </div>
-
-            <p class="text-center text-xs text-[#888780]">
-                Export brut horodaté :
-                <Link :href="`/pointage/rapport/export-quotidien?date=${encodeURIComponent(filtreDate)}`" class="font-medium text-[#185FA5] underline">
-                    rapport quotidien
-                </Link>
-            </p>
         </div>
     </PointageLayout>
 </template>

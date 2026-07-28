@@ -72,6 +72,7 @@ class PointageSiteController extends Controller
                 'region_label' => $agence->filiale?->nom,
                 'is_virtual' => (bool) $agence->is_virtual,
                 'parent_agence_id' => $agence->parent_agence_id,
+                'kiosk_serial_number' => $agence->kiosk_serial_number,
                 'kiosk_url' => $agence->pointage_kiosk_token
                     ? route('pointage.kiosk.show', ['token' => $agence->pointage_kiosk_token])
                     : null,
@@ -333,6 +334,61 @@ class PointageSiteController extends Controller
 
         return redirect()->route('pointage.sites.index')
             ->with('success', 'Agence virtuelle créée : '.$agence->nom.'. QR statique prêt pour la borne.');
+    }
+
+    /**
+     * Paramétrage du téléphone borne (n° de série) pour une agence virtuelle.
+     * clear=true libère l’appareil (perte / remplacement) ; sinon enregistre un nouveau serial.
+     */
+    public function updateKioskSerial(Request $request, Agence $site)
+    {
+        abort_unless($site->isEnrolledForPointageQr(), 404);
+        abort_unless($site->isVirtual(), 422, 'Le n° de série borne ne s’applique qu’aux agences virtuelles.');
+
+        $validated = $request->validate([
+            'clear' => 'nullable|boolean',
+            'kiosk_serial_number' => 'nullable|string|max:128',
+        ]);
+
+        $previous = $site->kiosk_serial_number;
+
+        if (! empty($validated['clear'])) {
+            $site->forceFill(['kiosk_serial_number' => null])->save();
+
+            PointageAuditLog::record(
+                Auth::user(),
+                'KIOSK_SERIAL',
+                'Réinitialisation téléphone borne — '.$site->nom,
+                $site,
+                $request->ip(),
+                'ok',
+                ['previous_serial' => $previous, 'action' => 'clear']
+            );
+
+            return redirect()->route('pointage.sites.index')
+                ->with('success', 'Téléphone borne libéré pour « '.$site->nom.' ». Le prochain scan enregistrera le nouvel appareil.');
+        }
+
+        $serial = \App\Support\MobileDeviceId::normalize((string) ($validated['kiosk_serial_number'] ?? ''));
+        if ($serial === '' || ! \App\Support\PointageDeviceDayGuard::isUsableFingerprint($serial)) {
+            return redirect()->route('pointage.sites.index')
+                ->with('error', 'Numéro de série invalide.');
+        }
+
+        $site->forceFill(['kiosk_serial_number' => $serial])->save();
+
+        PointageAuditLog::record(
+            Auth::user(),
+            'KIOSK_SERIAL',
+            'Mise à jour téléphone borne — '.$site->nom,
+            $site,
+            $request->ip(),
+            'ok',
+            ['previous_serial' => $previous, 'new_serial' => $serial, 'action' => 'set']
+        );
+
+        return redirect()->route('pointage.sites.index')
+            ->with('success', 'Téléphone borne mis à jour pour « '.$site->nom.' ».');
     }
 
     public function destroy(Agence $site)

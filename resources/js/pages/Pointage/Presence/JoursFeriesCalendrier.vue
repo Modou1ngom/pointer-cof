@@ -167,7 +167,6 @@ function onCellClick(c: Cell | { empty: true }) {
             <div class="flex flex-wrap items-center justify-between gap-4 print:hidden">
                 <div>
                     <h1 class="text-xl font-semibold text-[#0C447C]">Calendrier des jours fériés</h1>
-                    <p class="mt-1 text-sm text-[#5c5a57]">Référence présence / paie — cliquez sur un férié pour le détail.</p>
                 </div>
                 <Link href="/pointage/rh/presence/jours-feries" class="text-sm text-[#185FA5] underline">Liste & import</Link>
             </div>

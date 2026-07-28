@@ -450,12 +450,6 @@ onUnmounted(() => {
                     Fermer
                 </button>
             </div>
-            <ol class="mt-3 list-decimal space-y-1.5 pl-4 text-[12px] leading-relaxed text-[#555]">
-                <li>Ouvrir ce lien dans Chrome (tablette Android).</li>
-                <li>Autoriser la localisation : la borne enregistre le GPS du site pour le géorepérage.</li>
-                <li>Activer le plein écran, puis épingler l’écran Android.</li>
-                <li>Prod : Fully Kiosk Browser (URL de démarrage = ce lien).</li>
-            </ol>
         </div>
     </div>
 </template>

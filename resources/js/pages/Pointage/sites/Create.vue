@@ -123,10 +123,6 @@ function submit() {
                             <template v-else-if="s.profils_count > 1"> ({{ s.profils_count }} profils)</template>
                         </option>
                     </select>
-                    <p class="mt-1 text-xs text-[#5c5a57]">
-                        Le nom, le code agent et la filiale sont préremplis ; latitude et longitude à compléter si
-                        nécessaire.
-                    </p>
                 </div>
                 <div v-else>
                     <label class="text-[11px] font-bold uppercase text-[#888780]">Nom du site *</label>
@@ -165,10 +161,6 @@ function submit() {
                     />
                 </div>
                 <div class="space-y-2">
-                    <p class="text-xs text-[#888780]">
-                        Référence du <strong>bureau</strong> (géorepérage). Au pointage, l’employé envoie la position GPS de
-                        <strong>son appareil</strong> automatiquement — pas de saisie manuelle au scan.
-                    </p>
                     <button
                         type="button"
                         class="w-full rounded-md border border-[#185FA5] bg-[#E6F1FB] px-3 py-2 text-sm font-medium text-[#185FA5] disabled:opacity-50"
@@ -203,9 +195,6 @@ function submit() {
                         <input v-model="form.is_virtual" type="checkbox" class="mt-1 rounded border-[#e2e0d8]" />
                         <span>
                             <strong>Agence virtuelle</strong>
-                            <span class="mt-0.5 block text-xs text-[#5c5a57]">
-                                Borne partagée (1 téléphone) : QR statique, pointage des enrôlés par e-mail + OTP.
-                            </span>
                         </span>
                     </label>
                     <div v-if="form.is_virtual && (agencesExistantes?.length ?? 0) > 0">
@@ -226,7 +215,6 @@ function submit() {
                         <option value="dynamic">Dynamique</option>
                         <option value="static">Statique</option>
                     </select>
-                    <p v-if="form.is_virtual" class="mt-1 text-xs text-[#5c5a57]">QR statique obligatoire pour une agence virtuelle.</p>
                 </div>
                 <div>
                     <label class="text-[11px] font-bold uppercase text-[#888780]">Filiale</label>

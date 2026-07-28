@@ -101,11 +101,6 @@ function submit() {
         <div class="mx-auto max-w-4xl space-y-6">
             <div>
                 <h1 class="text-xl font-semibold text-[#0C447C]">Gestion des week-ends</h1>
-                <p class="mt-1 text-sm text-[#5c5a57]">
-                    Sélectionnez les jours considérés comme week-end (exclu du calcul de présence). Option week-end
-                    partiel : matin ouvrable le samedi ou le dimanche. Heures travaillées en week-end : majoration
-                    configurable (heures sup).
-                </p>
             </div>
 
             <p v-if="flashOk" class="rounded-lg border border-[#C0DD97] bg-[#EAF3DE] px-3 py-2 text-sm text-[#27500A]">{{ flashOk }}</p>

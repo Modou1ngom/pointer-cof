@@ -35,10 +35,6 @@ function submit() {
             <form class="space-y-4 rounded-[10px] border border-[#e2e0d8] bg-white p-6 shadow-sm" @submit.prevent="submit">
                 <DeclarationFormFields v-model:form="form" />
 
-                <div class="rounded-lg border border-[#B5D4F4] bg-[#E6F1FB] px-3 py-2 text-xs text-[#0C447C]">
-                    {{ validation_hint }}
-                </div>
-
                 <div class="flex flex-wrap gap-3 pt-2">
                     <button type="submit" :disabled="form.processing" class="rounded-md bg-[#185FA5] px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
                         Envoyer la déclaration →

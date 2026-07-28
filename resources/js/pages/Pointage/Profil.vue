@@ -156,10 +156,6 @@ function barToneClass(tone: string): string {
                             <span class="text-lg leading-none">✓</span>
                             <p>Empreinte digitale enregistrée sur cet appareil</p>
                         </div>
-                        <p class="mt-3 text-[11px] leading-relaxed text-[#888780]">
-                            Les données biométriques sont stockées localement sur votre appareil, chiffrées (AES-256), et ne sont jamais
-                            transmises en clair hors du terminal.
-                        </p>
                         <Link
                             href="/pointage/pointer"
                             class="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md border border-[#185FA5] bg-white px-4 py-2.5 text-sm font-medium text-[#185FA5] hover:bg-[#E6F1FB]"

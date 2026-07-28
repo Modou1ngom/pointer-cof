@@ -169,7 +169,6 @@ function statutBadgeClass(statut: string): string {
                         <ChevronRight class="h-4 w-4" />
                     </Link>
                 </div>
-                <p class="text-xs text-[#888780]">Filtre sur la <strong>date concernée</strong> de la déclaration.</p>
             </div>
 
             <div class="overflow-hidden rounded-[10px] border border-[#e2e0d8] bg-white shadow-sm">
@@ -239,31 +238,17 @@ function statutBadgeClass(statut: string): string {
                     </template>
                 </div>
             </div>
-
-            <div class="rounded-lg border border-[#B5D4F4] bg-[#E6F1FB] px-4 py-3 text-sm text-[#0C447C]">
-                Les déclarations validées par votre manager sont ensuite soumises à la RH avant d'impacter votre paie.
-            </div>
-
-            <p class="text-center text-sm text-[#888780]">
-                Vous pouvez aussi ouvrir le formulaire via
-                <Link href="/pointage/declarations/create" class="font-medium text-[#185FA5] underline">la page dédiée</Link>
-                .
-            </p>
         </div>
 
         <Dialog v-model:open="showModal">
             <DialogContent class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
                 <DialogHeader>
                     <DialogTitle class="text-lg font-semibold text-[#0C447C]">Nouvelle déclaration</DialogTitle>
-                    <DialogDescription class="text-left text-sm text-[#888780]"> Renseignez les champs ci-dessous. Les champs marqués par la validation serveur sont obligatoires. </DialogDescription>
+                    <DialogDescription class="sr-only">Nouvelle déclaration</DialogDescription>
                 </DialogHeader>
 
                 <form class="space-y-4 pt-2" @submit.prevent="submitDeclaration">
                     <DeclarationFormFields v-model:form="form" />
-
-                    <div class="rounded-lg border border-[#B5D4F4] bg-[#E6F1FB] px-3 py-2 text-xs text-[#0C447C]">
-                        {{ validation_hint }}
-                    </div>
 
                     <div class="flex flex-wrap justify-end gap-2 border-t border-[#e2e0d8] pt-4">
                         <button type="button" class="rounded-md border border-[#e2e0d8] bg-white px-4 py-2 text-sm font-medium text-[#0C447C] hover:bg-[#FAFAF8]" @click="closeModal">

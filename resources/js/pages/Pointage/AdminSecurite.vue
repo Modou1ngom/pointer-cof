@@ -26,9 +26,6 @@ const lignes = [
                     <span class="max-w-xs text-right text-[#888780]">{{ row[1] }}</span>
                 </div>
             </div>
-            <div class="rounded-lg border border-[#B5D4F4] bg-[#E6F1FB] px-4 py-3 text-sm text-[#0C447C]">
-                Les éléments « biométrie on-device », « Sage Paie » et « MFA » du maquette sont des extensions métier : branchez ici vos services réels (API paie, contrôle terminal, etc.).
-            </div>
         </div>
     </PointageLayout>
 </template>

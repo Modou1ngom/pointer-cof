@@ -148,6 +148,8 @@ Route::middleware(['auth'])->group(function () {
                 ->name('sites.update-rayons');
             Route::post('sites/{site}/creer-virtuelle', [PointageSiteController::class, 'storeVirtual'])
                 ->name('sites.creer-virtuelle');
+            Route::post('sites/{site}/kiosk-serial', [PointageSiteController::class, 'updateKioskSerial'])
+                ->name('sites.kiosk-serial');
             Route::resource('sites', PointageSiteController::class)->except(['show']);
             Route::post('sites/{site}/regenerer-qr', [PointageSiteController::class, 'regenererQr'])
                 ->name('sites.regenerer-qr');

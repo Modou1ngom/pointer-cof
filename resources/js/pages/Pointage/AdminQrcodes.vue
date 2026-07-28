@@ -24,9 +24,6 @@ const breadcrumbs: BreadcrumbItem[] = [
     <PointageLayout title="QR Codes sites" :breadcrumbs="breadcrumbs">
         <div class="mx-auto max-w-6xl space-y-6">
             <h1 class="text-xl font-semibold text-[#0C447C]">QR Codes par site</h1>
-            <p class="text-sm text-[#888780]">
-                Aperçu administratif uniquement : ces jetons ne sont pas liés à un employé et ne permettent pas le pointage. Pour pointer, chaque collaborateur utilise l’écran « Pointer » (QR personnel à la session).
-            </p>
             <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div
                     v-for="a in agences"

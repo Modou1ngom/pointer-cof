@@ -93,9 +93,6 @@ function submit() {
                     />
                 </div>
                 <div class="space-y-2">
-                    <p class="text-xs text-[#888780]">
-                        Coordonnées de référence du site. Au scan QR, seule la position GPS de l’appareil de l’employé est utilisée.
-                    </p>
                     <button
                         type="button"
                         class="w-full rounded-md border border-[#185FA5] bg-[#E6F1FB] px-3 py-2 text-sm font-medium text-[#185FA5] disabled:opacity-50"
@@ -125,17 +122,11 @@ function submit() {
                         <input v-model="form.is_virtual" type="checkbox" class="mt-1 rounded border-[#e2e0d8]" />
                         <span>
                             <strong>Agence virtuelle</strong>
-                            <span class="mt-0.5 block text-xs text-[#5c5a57]">
-                                Borne partagée : un seul téléphone (n° de série), pointage des enrôlés par e-mail + OTP.
-                            </span>
                         </span>
                     </label>
                 </div>
                 <div v-if="form.is_virtual" class="rounded-md border border-[#e2e0d8] bg-[#f8f7f4] p-3 space-y-2">
                     <label class="text-[11px] font-bold uppercase text-[#888780]">Téléphone borne (n° de série)</label>
-                    <p class="text-xs text-[#5c5a57]">
-                        Verrouillé au premier scan depuis l’app. Un seul appareil peut pointer sur cette agence.
-                    </p>
                     <input
                         v-model="form.kiosk_serial_number"
                         type="text"

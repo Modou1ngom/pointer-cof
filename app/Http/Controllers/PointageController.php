@@ -1067,9 +1067,9 @@ class PointageController extends Controller
             'heure_arrivee_ajustee' => 'required|date_format:H:i',
             'heure_depart_ajustee' => 'required|date_format:H:i',
             'plage_arrivee_debut' => 'required|date_format:H:i',
-            'plage_arrivee_fin' => 'required|date_format:H:i|after:plage_arrivee_debut',
+            'plage_arrivee_fin' => 'required|date_format:H:i|different:plage_arrivee_debut',
             'plage_depart_debut' => 'required|date_format:H:i',
-            'plage_depart_fin' => 'required|date_format:H:i|after:plage_depart_debut',
+            'plage_depart_fin' => 'required|date_format:H:i|different:plage_depart_debut',
             'tolerance_minutes' => 'required|integer|min:0|max:180',
             'seuil_heures_supplementaires_h_jour' => 'required|numeric|min:0|max:24',
             'delai_validation_manager_heures' => 'required|integer|min:1|max:720',
@@ -1078,6 +1078,9 @@ class PointageController extends Controller
             'penalite_absence_injustifiee_fcfa_jour' => 'required|integer|min:0',
             'majoration_heures_sup_pct' => 'required|integer|min:0|max:200',
             'mode_export_sage_paie' => 'required|in:mensuel_auto_1er,mensuel_manuel,hebdomadaire',
+        ], [
+            'plage_arrivee_fin.different' => 'La fin de la plage arrivée doit être différente du début (plage passant minuit autorisée).',
+            'plage_depart_fin.different' => 'La fin de la plage départ doit être différente du début (ex. 15:00 → 01:00 autorisé).',
         ]);
 
         $motifs = [];
@@ -1122,9 +1125,12 @@ class PointageController extends Controller
 
         $validated = $request->validate([
             'plage_arrivee_debut' => 'required|date_format:H:i',
-            'plage_arrivee_fin' => 'required|date_format:H:i|after:plage_arrivee_debut',
+            'plage_arrivee_fin' => 'required|date_format:H:i|different:plage_arrivee_debut',
             'plage_depart_debut' => 'required|date_format:H:i',
-            'plage_depart_fin' => 'required|date_format:H:i|after:plage_depart_debut',
+            'plage_depart_fin' => 'required|date_format:H:i|different:plage_depart_debut',
+        ], [
+            'plage_arrivee_fin.different' => 'La fin de la plage arrivée doit être différente du début (plage passant minuit autorisée).',
+            'plage_depart_fin.different' => 'La fin de la plage départ doit être différente du début (ex. 15:00 → 01:00 autorisé).',
         ]);
 
         $plages = [
