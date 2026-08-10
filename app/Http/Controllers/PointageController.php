@@ -19,6 +19,7 @@ use App\Services\Pointage\PointagePunchService;
 use App\Services\Pointage\PointageRecuperationService;
 use App\Services\PointageOtpService;
 use App\Services\PointageQrService;
+use App\Support\PointageDeclarationCouverture;
 use App\Support\PointageEnrolment;
 use App\Support\PointageGeofencing;
 use App\Support\PointageJourSemaine;
@@ -602,12 +603,24 @@ class PointageController extends Controller
 
         $today = Carbon::today()->toDateString();
         $emails = $profils->pluck('email')->filter()->values();
-        $userIds = \App\Models\User::query()->whereIn('email', $emails)->pluck('id');
+        $activeUsers = User::query()
+            ->whereIn('email', $emails)
+            ->where('is_active', true)
+            ->get(['id', 'email']);
+        $userIds = $activeUsers->pluck('id');
+        $activeEmails = $activeUsers
+            ->mapWithKeys(fn (User $u) => [mb_strtolower((string) $u->email) => true]);
+
         $pointagesToday = Pointage::query()
             ->whereDate('clocked_at', $today)
             ->whereIn('user_id', $userIds)
             ->get()
             ->keyBy('user_id');
+
+        // Comptes désactivés : hors équipe / hors absence attendue.
+        $profils = $profils
+            ->filter(fn (Profil $p) => isset($activeEmails[mb_strtolower((string) $p->email)]))
+            ->values();
 
         return Inertia::render('pointage/Equipe', [
             'profils' => $profils,
@@ -761,7 +774,7 @@ class PointageController extends Controller
         if (! is_string($statutFiltre)) {
             $statutFiltre = 'tous';
         }
-        if (! in_array($statutFiltre, ['tous', 'normal', 'retard', 'absent'], true)) {
+        if (! in_array($statutFiltre, ['tous', 'normal', 'retard', 'absent', 'justifie'], true)) {
             $statutFiltre = 'tous';
         }
 
@@ -825,7 +838,7 @@ class PointageController extends Controller
         if (! is_string($statutFiltre)) {
             $statutFiltre = 'tous';
         }
-        if (! in_array($statutFiltre, ['tous', 'normal', 'retard', 'absent'], true)) {
+        if (! in_array($statutFiltre, ['tous', 'normal', 'retard', 'absent', 'justifie'], true)) {
             $statutFiltre = 'tous';
         }
 
@@ -868,10 +881,21 @@ class PointageController extends Controller
 
         $perPage = 50;
         $page = max(1, (int) $request->query('page', 1));
-        $paginator = $query
-            ->paginate($perPage, ['*'], 'page', $page)
-            ->withQueryString()
-            ->through(fn (Pointage $p) => $recuperation->mapRow($p));
+
+        $journeeRows = collect($recuperation->mapExportJourneeRows($query->get()));
+        $total = $journeeRows->count();
+        $slice = $journeeRows->forPage($page, $perPage)->values();
+
+        $paginator = new \Illuminate\Pagination\LengthAwarePaginator(
+            $slice,
+            $total,
+            $perPage,
+            $page,
+            [
+                'path' => $request->url(),
+                'query' => $request->query(),
+            ]
+        );
 
         return Inertia::render('Pointage/Presence/RecuperationPointages', [
             'pointages' => $paginator,
@@ -888,7 +912,8 @@ class PointageController extends Controller
         abort_unless($user && ($user->isRh() || $user->isAdmin()), 403);
 
         $filters = $recuperation->parseFilters($request->query());
-        $rows = $recuperation->baseQuery($filters)->get()->map(fn (Pointage $p) => $recuperation->mapRow($p));
+        $pointages = $recuperation->baseQuery($filters)->get();
+        $rows = $recuperation->mapExportJourneeRows($pointages);
 
         $filename = 'recuperation-pointages-'.$filters['date_debut'].'_'.$filters['date_fin'].'.csv';
 
@@ -897,7 +922,9 @@ class PointageController extends Controller
             fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF));
             fputcsv($out, [
                 'Date', 'Employé', 'Email', 'Matricule', 'Service', 'Agence',
-                'Type', 'Heure effective', 'Heure réelle', 'Horodatage', 'GPS', 'QR', 'Biom.', 'Statut', 'Férié auto',
+                'Type', 'H.A. effective', 'H.D. effective',
+                'Total H.effective',
+                'Horodatage', 'QR', 'Statut', 'Férié auto',
             ], ';');
             foreach ($rows as $r) {
                 fputcsv($out, [
@@ -908,12 +935,11 @@ class PointageController extends Controller
                     $r['service'],
                     $r['agence'],
                     $r['type_label'],
-                    $r['heure_effective'],
-                    $r['heure_reelle'],
+                    $r['ha_effective'],
+                    $r['hd_effective'],
+                    $r['total_effective'],
                     $r['horodatage'],
-                    $r['gps_ok'] ? 'OK' : 'KO',
                     $r['qr_verified'] ? 'OK' : 'KO',
-                    $r['biometric_ok'] ? 'OK' : 'KO',
                     $r['statut_label'],
                     $r['auto_ferie'] ? 'Oui' : 'Non',
                 ], ';');
@@ -939,7 +965,8 @@ class PointageController extends Controller
             ->whereExists(function ($q): void {
                 $q->selectRaw('1')
                     ->from('users')
-                    ->whereColumn('users.email', 'profiles.email');
+                    ->whereColumn('users.email', 'profiles.email')
+                    ->where('users.is_active', true);
             });
 
         if ($agenceFiltre !== '' && $agenceFiltre !== 'tous') {
@@ -955,6 +982,7 @@ class PointageController extends Controller
         $emails = $profils->pluck('email')->filter()->unique()->values();
         $usersByEmail = User::query()
             ->whereIn('email', $emails)
+            ->where('is_active', true)
             ->get()
             ->keyBy(fn (User $u) => mb_strtolower((string) $u->email));
 
@@ -969,6 +997,8 @@ class PointageController extends Controller
             ->orderBy('clocked_at')
             ->get()
             ->groupBy('user_id');
+
+        $couvertureByUser = PointageDeclarationCouverture::mapPourUsersJour($userIds, $jour);
 
         $rows = collect();
 
@@ -988,6 +1018,8 @@ class PointageController extends Controller
             /** @var Pointage|null $depart */
             $depart = $sorted->filter(fn (Pointage $p) => $p->type === 'depart')->sortByDesc(fn (Pointage $p) => $p->clocked_at->timestamp)->first();
 
+            $couverture = $couvertureByUser->get($u->id, ['couvert' => false]);
+
             if (! $arrivee) {
                 $heuresLabel = '0h00';
                 $gpsOk = false;
@@ -995,6 +1027,9 @@ class PointageController extends Controller
                 $arriveeStr = '—';
                 $departStr = '—';
                 $jourStatut = $this->jourStatutSansPointage($jour);
+                if ($jourStatut === 'absent' && ($couverture['couvert'] ?? false)) {
+                    $jourStatut = 'justifie';
+                }
             } else {
                 $arriveeStr = $arrivee->clocked_at->format('H:i');
                 $departStr = $depart ? $depart->clocked_at->format('H:i') : '—';
@@ -1016,6 +1051,7 @@ class PointageController extends Controller
             $statutLabel = match ($jourStatut) {
                 'retard' => 'Retard',
                 'absent' => 'Absent',
+                'justifie' => (string) ($couverture['label'] ?? 'Justifié'),
                 'ferie' => 'Jour férié',
                 'non_ouvre' => 'Non ouvré',
                 default => 'Normal',

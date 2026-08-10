@@ -188,13 +188,17 @@ class PointageFicheHorairesService
             ->whereExists(function ($q): void {
                 $q->selectRaw('1')
                     ->from('users')
-                    ->whereColumn('users.email', 'profiles.email');
+                    ->whereColumn('users.email', 'profiles.email')
+                    ->where('users.is_active', true);
             })
             ->orderBy('nom')
             ->orderBy('prenom')
             ->get()
             ->map(function (Profil $profil): ?array {
-                $user = User::query()->where('email', $profil->email)->first();
+                $user = User::query()
+                    ->where('email', $profil->email)
+                    ->where('is_active', true)
+                    ->first();
                 if ($user === null) {
                     return null;
                 }

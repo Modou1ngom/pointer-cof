@@ -2,7 +2,7 @@
 import PointageLayout from '@/layouts/pointage/PointageLayout.vue';
 import type { BreadcrumbItem } from '@/types';
 import { Link, router } from '@inertiajs/vue3';
-import { Calendar, Check, Download, Search, X } from 'lucide-vue-next';
+import { Calendar, Download, Search } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 
 type Row = {
@@ -16,11 +16,13 @@ type Row = {
     agence: string;
     type: string;
     type_label: string;
-    heure_effective: string;
-    heure_reelle: string;
+    ha_effective: string;
+    ha_reelle: string;
+    hd_effective: string;
+    hd_reelle: string;
+    total_effective: string;
+    total_reelle: string;
     horodatage: string;
-    gps_ok: boolean;
-    biometric_ok: boolean;
     qr_verified: boolean;
     statut: string;
     statut_label: string;
@@ -56,8 +58,8 @@ const props = defineProps<{
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Pointage & Présence', href: '/pointage/rh/presence/recuperation-pointages' },
-    { title: 'Récupération des pointages', href: '#' },
+    { title: 'Pointage', href: '/pointage/rh/presence/recuperation-pointages' },
+    { title: 'Dashboard', href: '#' },
 ];
 
 const searchQ = ref(props.filters.q);
@@ -118,19 +120,17 @@ function statutBadgeClass(statut: string): string {
     return 'border-[#BBF7D0] bg-[#EAF3DE] text-[#166534]';
 }
 
-function typeBadgeClass(type: string): string {
-    return type === 'arrivee'
-        ? 'border-[#B5D4F4] bg-[#E6F1FB] text-[#0C447C]'
-        : 'border-[#E9D5FF] bg-[#F3E8FF] text-[#6B21A8]';
+function typeBadgeClass(_type: string): string {
+    return 'border-[#B5D4F4] bg-[#E6F1FB] text-[#0C447C]';
 }
 </script>
 
 <template>
-    <PointageLayout title="Récupération des pointages" :breadcrumbs="breadcrumbs">
+    <PointageLayout title="Dashboard" :breadcrumbs="breadcrumbs">
         <div class="mx-auto max-w-[1400px] space-y-6">
             <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                    <h1 class="text-xl font-semibold text-[#0C447C]">Récupération des pointages</h1>
+                    <h1 class="text-xl font-semibold text-[#0C447C]">Dashboard</h1>
                     <p class="mt-1 text-sm text-[#888780]">{{ periode_label }}</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
@@ -263,7 +263,7 @@ function typeBadgeClass(type: string): string {
 
             <div class="overflow-hidden rounded-[10px] border border-[#e2e0d8] bg-white shadow-sm">
                 <div class="overflow-x-auto">
-                    <table class="w-full min-w-[1100px] text-sm">
+                    <table class="w-full min-w-[1200px] text-sm">
                         <thead class="border-b border-[#e2e0d8] bg-[#FAFAF8] text-left text-[10px] font-bold uppercase tracking-wide text-[#888780]">
                             <tr>
                                 <th class="px-3 py-3">Date</th>
@@ -272,17 +272,19 @@ function typeBadgeClass(type: string): string {
                                 <th class="px-3 py-3">Service</th>
                                 <th class="px-3 py-3">Agence</th>
                                 <th class="px-3 py-3">Type</th>
-                                <th class="px-3 py-3">H. effective</th>
-                                <th class="px-3 py-3">H. réelle</th>
-                                <th class="px-3 py-3 text-center">GPS</th>
-                                <th class="px-3 py-3 text-center">Bio</th>
+                                <th class="px-3 py-3">H.A. effective</th>
+                                <th class="px-3 py-3">H.A. réelle</th>
+                                <th class="px-3 py-3">H.D. effective</th>
+                                <th class="px-3 py-3">H.D. réelle</th>
+                                <th class="px-3 py-3">Total H.eff.</th>
+                                <th class="px-3 py-3">Total H.réelle</th>
                                 <th class="px-3 py-3">Statut</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr
                                 v-for="p in pointages.data"
-                                :key="p.id"
+                                :key="`${p.user_id}-${p.date}`"
                                 class="border-b border-[#F1EFE8] last:border-0 hover:bg-[#FAFAF8]/80"
                             >
                                 <td class="px-3 py-2.5 tabular-nums text-[#0C447C]">{{ p.date }}</td>
@@ -304,16 +306,12 @@ function typeBadgeClass(type: string): string {
                                         {{ p.type_label }}
                                     </span>
                                 </td>
-                                <td class="px-3 py-2.5 tabular-nums font-medium text-[#0C447C]">{{ p.heure_effective }}</td>
-                                <td class="px-3 py-2.5 tabular-nums text-[#888780]">{{ p.heure_reelle }}</td>
-                                <td class="px-3 py-2.5 text-center">
-                                    <Check v-if="p.gps_ok" class="mx-auto inline h-4 w-4 text-[#3B6D11]" />
-                                    <X v-else class="mx-auto inline h-4 w-4 text-[#DC2626]" />
-                                </td>
-                                <td class="px-3 py-2.5 text-center">
-                                    <Check v-if="p.biometric_ok" class="mx-auto inline h-4 w-4 text-[#3B6D11]" />
-                                    <X v-else class="mx-auto inline h-4 w-4 text-[#888780]" />
-                                </td>
+                                <td class="px-3 py-2.5 tabular-nums font-medium text-[#0C447C]">{{ p.ha_effective }}</td>
+                                <td class="px-3 py-2.5 tabular-nums text-[#888780]">{{ p.ha_reelle }}</td>
+                                <td class="px-3 py-2.5 tabular-nums font-medium text-[#0C447C]">{{ p.hd_effective }}</td>
+                                <td class="px-3 py-2.5 tabular-nums text-[#888780]">{{ p.hd_reelle }}</td>
+                                <td class="px-3 py-2.5 tabular-nums font-semibold text-[#0C447C]">{{ p.total_effective }}</td>
+                                <td class="px-3 py-2.5 tabular-nums text-[#888780]">{{ p.total_reelle }}</td>
                                 <td class="px-3 py-2.5">
                                     <span
                                         class="inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold"
@@ -324,7 +322,7 @@ function typeBadgeClass(type: string): string {
                                 </td>
                             </tr>
                             <tr v-if="!pointages.data?.length">
-                                <td colspan="12" class="px-4 py-12 text-center text-[#888780]">
+                                <td colspan="13" class="px-4 py-12 text-center text-[#888780]">
                                     Aucun pointage pour cette période et ces filtres.
                                 </td>
                             </tr>

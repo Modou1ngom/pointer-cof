@@ -19,6 +19,7 @@ interface Decl {
     statut_label?: string;
     has_justificatif?: boolean;
     user?: { name: string; email: string } | null;
+    manager_user?: { name: string } | null;
 }
 
 defineProps<{
@@ -28,7 +29,7 @@ defineProps<{
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Pointage', href: '/pointage' },
-    { title: 'Validations manager', href: '#' },
+    { title: 'Validations RH', href: '#' },
 ];
 
 function periode(d: Decl): string {
@@ -43,24 +44,28 @@ function periode(d: Decl): string {
 }
 
 function decide(id: number, accept: boolean) {
-    router.post(`/pointage/declarations/${id}/decision-manager`, { accept, comment: '' }, { preserveScroll: true });
+    router.post(`/pointage/declarations/${id}/decision-rh`, { accept, comment: '' }, { preserveScroll: true });
 }
 </script>
 
 <template>
-    <PointageLayout title="Validations manager" :breadcrumbs="breadcrumbs">
+    <PointageLayout title="Validations RH" :breadcrumbs="breadcrumbs">
         <div class="mx-auto max-w-6xl space-y-8">
-            <h1 class="text-xl font-semibold text-[#0C447C]">Déclarations à valider (manager / N+1)</h1>
+            <h1 class="text-xl font-semibold text-[#0C447C]">Déclarations à valider (RH)</h1>
+            <p class="text-sm text-[#888780]">
+                Après validation, les absences justifiées (congé, mission, formation…) ne sont plus considérées comme absences injustifiées.
+            </p>
 
             <div class="overflow-hidden rounded-[10px] border border-[#e2e0d8] bg-white">
-                <div class="border-b border-[#e2e0d8] px-4 py-3 text-sm font-semibold">En attente</div>
+                <div class="border-b border-[#e2e0d8] px-4 py-3 text-sm font-semibold">En attente RH</div>
                 <table class="w-full text-sm">
                     <thead class="bg-[#FAFAF8] text-left text-[10px] font-bold uppercase text-[#888780]">
                         <tr>
                             <th class="px-4 py-2">Employé</th>
                             <th class="px-4 py-2">Type</th>
                             <th class="px-4 py-2">Période</th>
-                            <th class="px-4 py-2">Motif</th>
+                            <th class="px-4 py-2">Motif / Lieu</th>
+                            <th class="px-4 py-2">N+1</th>
                             <th class="px-4 py-2"></th>
                         </tr>
                     </thead>
@@ -68,14 +73,13 @@ function decide(id: number, accept: boolean) {
                         <tr v-for="d in pending" :key="d.id" class="border-t border-[#F1EFE8]">
                             <td class="px-4 py-2">{{ d.user?.name }}</td>
                             <td class="px-4 py-2">{{ d.type_label }}</td>
-                            <td class="px-4 py-2">
-                                <div>{{ periode(d) }}</div>
-                                <div v-if="d.lieu" class="text-xs text-[#888780]">{{ d.lieu }}</div>
-                            </td>
+                            <td class="px-4 py-2">{{ periode(d) }}</td>
                             <td class="px-4 py-2">
                                 <div>{{ d.motif }}</div>
+                                <div v-if="d.lieu" class="text-xs text-[#888780]">{{ d.lieu }}</div>
                                 <div v-if="d.has_justificatif" class="text-xs text-[#185FA5]">Justificatif joint</div>
                             </td>
+                            <td class="px-4 py-2">{{ d.manager_user?.name || '—' }}</td>
                             <td class="space-x-2 px-4 py-2 whitespace-nowrap">
                                 <button type="button" class="rounded bg-[#EAF3DE] px-2 py-1 text-xs text-[#3B6D11]" @click="decide(d.id, true)">
                                     Valider
@@ -86,7 +90,7 @@ function decide(id: number, accept: boolean) {
                             </td>
                         </tr>
                         <tr v-if="!pending?.length">
-                            <td colspan="5" class="px-4 py-8 text-center text-[#888780]">Rien en attente.</td>
+                            <td colspan="6" class="px-4 py-8 text-center text-[#888780]">Rien en attente.</td>
                         </tr>
                     </tbody>
                 </table>
@@ -99,6 +103,7 @@ function decide(id: number, accept: boolean) {
                         <tr>
                             <th class="px-4 py-2">Employé</th>
                             <th class="px-4 py-2">Type</th>
+                            <th class="px-4 py-2">Période</th>
                             <th class="px-4 py-2">Statut</th>
                         </tr>
                     </thead>
@@ -106,7 +111,11 @@ function decide(id: number, accept: boolean) {
                         <tr v-for="d in history" :key="'h-' + d.id" class="border-t border-[#F1EFE8]">
                             <td class="px-4 py-2">{{ d.user?.name }}</td>
                             <td class="px-4 py-2">{{ d.type_label }}</td>
+                            <td class="px-4 py-2">{{ periode(d) }}</td>
                             <td class="px-4 py-2">{{ d.statut_label || d.statut }}</td>
+                        </tr>
+                        <tr v-if="!history?.length">
+                            <td colspan="4" class="px-4 py-8 text-center text-[#888780]">Aucun historique.</td>
                         </tr>
                     </tbody>
                 </table>

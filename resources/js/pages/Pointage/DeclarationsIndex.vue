@@ -21,6 +21,11 @@ const props = defineProps<{
             type_label: string;
             date_concernee: string;
             date_concernee_display: string;
+            date_fin?: string | null;
+            date_fin_display?: string | null;
+            heure_debut?: string | null;
+            heure_fin?: string | null;
+            lieu?: string | null;
             motif: string;
             commentaire: string | null;
             has_justificatif: boolean;
@@ -47,18 +52,26 @@ const breadcrumbs: BreadcrumbItem[] = [
 const showModal = ref(false);
 
 const form = useForm({
-    type: 'retard',
+    type: 'permission_exceptionnelle',
     date_concernee: new Date().toISOString().slice(0, 10),
-    motif: 'Transport perturbé',
+    date_fin: '',
+    heure_debut: '',
+    heure_fin: '',
+    lieu: '',
+    motif: 'Permission exceptionnelle',
     commentaire: '',
     justificatif: null as File | null,
 });
 
 function resetForm() {
     form.defaults({
-        type: 'retard',
+        type: 'permission_exceptionnelle',
         date_concernee: new Date().toISOString().slice(0, 10),
-        motif: 'Transport perturbé',
+        date_fin: '',
+        heure_debut: '',
+        heure_fin: '',
+        lieu: '',
+        motif: 'Permission exceptionnelle',
         commentaire: '',
         justificatif: null,
     });
@@ -189,7 +202,14 @@ function statutBadgeClass(statut: string): string {
                         </thead>
                         <tbody>
                             <tr v-for="d in declarations.data" :key="d.id" class="border-b border-[#F1EFE8] last:border-0 hover:bg-[#FAFAF8]/80">
-                                <td class="whitespace-nowrap px-4 py-3 text-[#0C447C]">{{ d.date_concernee_display }}</td>
+                                <td class="whitespace-nowrap px-4 py-3 text-[#0C447C]">
+                                    <template v-if="d.date_fin_display">{{ d.date_concernee_display }} → {{ d.date_fin_display }}</template>
+                                    <template v-else>
+                                        {{ d.date_concernee_display }}
+                                        <span v-if="d.heure_debut && d.heure_fin" class="block text-xs text-[#888780]">{{ d.heure_debut }}–{{ d.heure_fin }}</span>
+                                    </template>
+                                    <span v-if="d.lieu" class="block text-xs text-[#888780]">{{ d.lieu }}</span>
+                                </td>
                                 <td class="px-4 py-3">{{ d.type_label }}</td>
                                 <td class="max-w-[200px] px-4 py-3">
                                     <span class="line-clamp-2" :title="d.motif">{{ d.motif }}</span>

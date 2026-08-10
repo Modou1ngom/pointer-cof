@@ -16,9 +16,13 @@ const breadcrumbs: BreadcrumbItem[] = [
 ];
 
 const form = useForm({
-    type: 'retard',
+    type: 'permission_exceptionnelle',
     date_concernee: new Date().toISOString().slice(0, 10),
-    motif: 'Transport perturbé',
+    date_fin: '',
+    heure_debut: '',
+    heure_fin: '',
+    lieu: '',
+    motif: 'Permission exceptionnelle',
     commentaire: '',
     justificatif: null as File | null,
 });

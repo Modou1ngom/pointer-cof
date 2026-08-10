@@ -82,6 +82,15 @@ Route::middleware(['auth'])->group(function () {
             Route::get('/declarations', [PointageDeclarationController::class, 'index'])->name('declarations.index');
             Route::get('/declarations/create', [PointageDeclarationController::class, 'create'])->name('declarations.create');
             Route::post('/declarations', [PointageDeclarationController::class, 'store'])->name('declarations.store');
+            Route::get('/demandes', [PointageDeclarationController::class, 'demande'])
+                ->name('declarations.demande');
+            Route::get('/declarations/regulation', function () {
+                return redirect()->route('pointage.declarations.demande', request()->query());
+            })->name('declarations.regulation');
+            Route::put('/declarations/{declaration}', [PointageDeclarationController::class, 'update'])
+                ->name('declarations.update');
+            Route::delete('/declarations/{declaration}', [PointageDeclarationController::class, 'destroy'])
+                ->name('declarations.destroy');
             Route::get('/declarations/validation-manager', [PointageDeclarationController::class, 'validationManager'])
                 ->name('declarations.validation-manager');
             Route::post('/declarations/{declaration}/decision-manager', [PointageDeclarationController::class, 'decisionManager'])
@@ -162,6 +171,9 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/declarations/{declaration}/decision-rh', [PointageDeclarationController::class, 'decisionRh'])
                 ->name('declarations.decision-rh');
             Route::get('/rapport', [PointageRapportController::class, 'index'])->name('rapport');
+            Route::get('/rapport/reporting', [PointageRapportController::class, 'index'])->name('rapport.reporting');
+            Route::get('/rapport/reporting/export', [PointageRapportController::class, 'export'])
+                ->name('rapport.reporting.export');
             Route::get('/rapport/export-mensuel-rh', [PointageRapportController::class, 'exportMensuelRh'])
                 ->name('rapport.export-mensuel-rh');
             Route::get('/rapport/export-quotidien', [PointageRapportController::class, 'exportQuotidien'])

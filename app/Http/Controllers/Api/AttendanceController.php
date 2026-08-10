@@ -10,6 +10,7 @@ use App\Models\Notification;
 use App\Models\PointrustQrSession;
 use App\Services\Pointage\PointagePunchService;
 use App\Services\PointageQrScanResolver;
+use App\Support\PointageDeclarationCouverture;
 use App\Support\PointageEnrolment;
 use App\Support\PointageGeofencing;
 use App\Support\PointageJourSemaine;
@@ -60,6 +61,13 @@ class AttendanceController extends Controller
 
         $byDate = $rows->groupBy(fn (Attendance $a) => $a->recorded_at->toDateString());
 
+        // Une seule requête pour toutes les déclarations justifiantes de la période (évite N+1).
+        $justificationsByDay = PointageDeclarationCouverture::labelsPourUserPeriode(
+            (int) $user->id,
+            $from,
+            $to,
+        );
+
         $data = [];
         foreach (CarbonPeriod::create($from->toDateString(), $to->toDateString()) as $day) {
             $dateStr = $day->toDateString();
@@ -77,14 +85,22 @@ class AttendanceController extends Controller
                 $status = 'partial';
             }
 
+            $couverture = null;
+            if ($status === 'absent') {
+                $label = $justificationsByDay[$dateStr] ?? null;
+                if (is_string($label) && $label !== '') {
+                    $status = 'justifie';
+                    $couverture = $label;
+                }
+            }
+
             $data[] = [
                 'id' => $checkin?->id ?? $checkout?->id,
                 'date' => $dateStr,
                 'check_in' => $checkInIso,
                 'check_out' => $checkOutIso,
-                'checkIn' => $checkInIso,
-                'checkOut' => $checkOutIso,
                 'status' => $status,
+                'justification_label' => $couverture,
             ];
         }
 

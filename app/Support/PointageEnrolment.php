@@ -23,6 +23,24 @@ final class PointageEnrolment
     {
         $at = $at ?? Carbon::now();
 
+        if (! $user->is_active) {
+            return [
+                'ok' => false,
+                'reason' => 'user_inactive',
+                'message' => 'Compte collaborateur désactivé. Pointage non autorisé.',
+            ];
+        }
+
+        $user->profilCollaborateurAssocie();
+        $profil = $user->profil;
+        if ($profil !== null && strtolower((string) $profil->statut) !== 'actif') {
+            return [
+                'ok' => false,
+                'reason' => 'profil_inactive',
+                'message' => 'Profil RH inactif. Pointage non autorisé.',
+            ];
+        }
+
         $affectation = self::resolveAffectation($user);
         if ($affectation !== null) {
             return self::ensureAuthorizedViaAffectation($affectation, $agence, $at);

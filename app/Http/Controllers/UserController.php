@@ -295,15 +295,22 @@ class UserController extends Controller
 
     /**
      * Toggle the active status of a user.
+     * Désactivation compte → profil RH inactif (ne doit plus apparaître en absence).
      */
     public function toggle(User $user)
     {
         $user->is_active = ! $user->is_active;
         $user->save();
 
+        $user->profilCollaborateurAssocie();
+        $profil = $user->profil;
+        if ($profil !== null) {
+            $profil->statut = $user->is_active ? 'actif' : 'inactif';
+            $profil->save();
+        }
+
         $status = $user->is_active ? 'activé' : 'désactivé';
 
-        return redirect()->route('users.index')
-            ->with('success', "Utilisateur {$status} avec succès !");
+        return back()->with('success', "Utilisateur {$status} avec succès !");
     }
 }

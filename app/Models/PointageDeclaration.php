@@ -11,6 +11,10 @@ class PointageDeclaration extends Model
         'user_id',
         'type',
         'date_concernee',
+        'date_fin',
+        'heure_debut',
+        'heure_fin',
+        'lieu',
         'motif',
         'commentaire',
         'justificatif_path',
@@ -27,6 +31,7 @@ class PointageDeclaration extends Model
     {
         return [
             'date_concernee' => 'date',
+            'date_fin' => 'date',
             'manager_decided_at' => 'datetime',
             'rh_decided_at' => 'datetime',
         ];
@@ -45,5 +50,10 @@ class PointageDeclaration extends Model
     public function rhUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'rh_user_id');
+    }
+
+    public function hasJustificatif(): bool
+    {
+        return is_string($this->justificatif_path) && $this->justificatif_path !== '';
     }
 }

@@ -92,6 +92,7 @@ final class PointageHorairesAjustementService
         $heureEffective = $clockedAt->format('H:i');
 
         if ($type === 'arrivee') {
+            // Avant / dans la tolérance de 08:00 → effective = heure ajustée ; après → réelle.
             if ($clockedAt->greaterThan($limiteRetard)) {
                 $statut = 'retard';
                 $heureEffective = $clockedAt->format('H:i');
@@ -100,11 +101,13 @@ final class PointageHorairesAjustementService
                 $heureEffective = $this->formatTimeShort($heureArriveeAjustee);
             }
         } else {
-            if ($clockedAt->lte($limiteDepart)) {
+            // Symétrique à l’entrée (réf. 17:00) :
+            // avant 17:00 → effective = réelle ; à partir de 17:00 → effective = heure ajustée.
+            if ($clockedAt->lt($limiteDepart)) {
+                $heureEffective = $clockedAt->format('H:i');
+            } else {
                 $ajustementApplique = true;
                 $heureEffective = $this->formatTimeShort($heureDepartAjustee);
-            } else {
-                $heureEffective = $clockedAt->format('H:i');
             }
         }
 

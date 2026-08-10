@@ -1,0 +1,145 @@
+<?php
+
+namespace App\Support;
+
+use App\Models\PointageDeclaration;
+use Carbon\Carbon;
+use Illuminate\Support\Collection;
+
+/**
+ * Déclarations RH validées qui couvrent une journée (pas d’absence injustifiée).
+ */
+final class PointageDeclarationCouverture
+{
+    /**
+     * @return array{couvert: bool, type?: string, label?: string, declaration_id?: int}
+     */
+    public static function pourUserJour(int $userId, Carbon $jour): array
+    {
+        $day = $jour->toDateString();
+
+        $d = PointageDeclaration::query()
+            ->where('user_id', $userId)
+            ->where('statut', 'valide')
+            ->whereIn('type', PointageDeclarationTypes::TYPES_JUSTIFICATIFS_PRESENCE)
+            ->where(function ($q) use ($day): void {
+                // Plage : début <= jour <= fin
+                $q->where(function ($w) use ($day): void {
+                    $w->whereNotNull('date_fin')
+                        ->whereDate('date_concernee', '<=', $day)
+                        ->whereDate('date_fin', '>=', $day);
+                })->orWhere(function ($w) use ($day): void {
+                    // Jour unique (sans date_fin)
+                    $w->whereNull('date_fin')
+                        ->whereDate('date_concernee', $day);
+                });
+            })
+            ->orderByDesc('id')
+            ->first();
+
+        if ($d === null) {
+            return ['couvert' => false];
+        }
+
+        return [
+            'couvert' => true,
+            'type' => $d->type,
+            'label' => PointageDeclarationTypes::label((string) $d->type),
+            'declaration_id' => $d->id,
+        ];
+    }
+
+    /**
+     * Prefetch pour une liste d’users / un jour (évite N+1).
+     *
+     * @param  list<int>  $userIds
+     * @return Collection<int, array{couvert: bool, type?: string, label?: string, declaration_id?: int}>
+     */
+    public static function mapPourUsersJour(array $userIds, Carbon $jour): Collection
+    {
+        $day = $jour->toDateString();
+        $decls = PointageDeclaration::query()
+            ->whereIn('user_id', $userIds ?: [0])
+            ->where('statut', 'valide')
+            ->whereIn('type', PointageDeclarationTypes::TYPES_JUSTIFICATIFS_PRESENCE)
+            ->where(function ($q) use ($day): void {
+                $q->where(function ($w) use ($day): void {
+                    $w->whereNotNull('date_fin')
+                        ->whereDate('date_concernee', '<=', $day)
+                        ->whereDate('date_fin', '>=', $day);
+                })->orWhere(function ($w) use ($day): void {
+                    $w->whereNull('date_fin')
+                        ->whereDate('date_concernee', $day);
+                });
+            })
+            ->orderByDesc('id')
+            ->get()
+            ->unique('user_id')
+            ->keyBy('user_id');
+
+        $out = collect();
+        foreach ($userIds as $uid) {
+            $d = $decls->get($uid);
+            $out->put($uid, $d
+                ? [
+                    'couvert' => true,
+                    'type' => $d->type,
+                    'label' => PointageDeclarationTypes::label((string) $d->type),
+                    'declaration_id' => $d->id,
+                ]
+                : ['couvert' => false]);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Labels de justification indexés par date (Y-m-d) pour un utilisateur / période.
+     * Une seule requête SQL, puis couverture en mémoire.
+     *
+     * @return array<string, string> date => label
+     */
+    public static function labelsPourUserPeriode(int $userId, Carbon $from, Carbon $to): array
+    {
+        $fromDay = $from->toDateString();
+        $toDay = $to->toDateString();
+
+        $decls = PointageDeclaration::query()
+            ->where('user_id', $userId)
+            ->where('statut', 'valide')
+            ->whereIn('type', PointageDeclarationTypes::TYPES_JUSTIFICATIFS_PRESENCE)
+            ->whereDate('date_concernee', '<=', $toDay)
+            ->where(function ($q) use ($fromDay): void {
+                $q->where(function ($w) use ($fromDay): void {
+                    $w->whereNotNull('date_fin')
+                        ->whereDate('date_fin', '>=', $fromDay);
+                })->orWhere(function ($w) use ($fromDay): void {
+                    $w->whereNull('date_fin')
+                        ->whereDate('date_concernee', '>=', $fromDay);
+                });
+            })
+            ->orderByDesc('id')
+            ->get(['id', 'type', 'date_concernee', 'date_fin']);
+
+        $out = [];
+        foreach ($decls as $d) {
+            $start = $d->date_concernee?->toDateString();
+            if ($start === null) {
+                continue;
+            }
+            $end = $d->date_fin?->toDateString() ?? $start;
+            $cursor = Carbon::parse($start)->startOfDay();
+            $endC = Carbon::parse($end)->startOfDay();
+            $label = PointageDeclarationTypes::label((string) $d->type);
+            while ($cursor->lte($endC)) {
+                $key = $cursor->toDateString();
+                if ($key >= $fromDay && $key <= $toDay && ! isset($out[$key])) {
+                    $out[$key] = $label;
+                }
+                $cursor->addDay();
+            }
+        }
+
+        return $out;
+    }
+}

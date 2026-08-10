@@ -15,6 +15,13 @@ use Illuminate\Support\Collection;
  */
 final class PointageRecuperationService
 {
+    private readonly PointageHeuresCalculService $heures;
+
+    public function __construct(?PointageHeuresCalculService $heures = null)
+    {
+        $this->heures = $heures ?? new PointageHeuresCalculService;
+    }
+
     /**
      * @return array{
      *     date_debut: string,
@@ -180,14 +187,90 @@ final class PointageRecuperationService
             'heure_effective' => $p->heureAffichee(),
             'heure_reelle' => $p->heureReelleAffichee(),
             'horodatage' => FrenchDateFormat::dateTime($p->clocked_at),
-            'gps_ok' => $p->latitude !== null && $p->longitude !== null,
-            'biometric_ok' => (bool) $p->biometric_ok,
             'qr_verified' => (bool) $p->qr_verified,
             'statut' => $p->statut,
             'statut_label' => $statutLabel,
             'auto_ferie' => ($meta['auto_ferie'] ?? false) === true,
             'ferie_libelle' => is_string($meta['ferie_libelle'] ?? null) ? $meta['ferie_libelle'] : null,
         ];
+    }
+
+    /**
+     * Lignes d’export Excel : une ligne par employé / jour (Arrivée + Départ).
+     *
+     * @param  Collection<int, Pointage>  $pointages
+     * @return list<array<string, mixed>>
+     */
+    public function mapExportJourneeRows(Collection $pointages): array
+    {
+        $grouped = $pointages
+            ->sortBy(fn (Pointage $p) => $p->clocked_at->timestamp)
+            ->groupBy(fn (Pointage $p) => $p->user_id.'|'.$p->clocked_at->toDateString());
+
+        $rows = [];
+        foreach ($grouped as $items) {
+            /** @var Collection<int, Pointage> $items */
+            $sorted = $items->sortBy(fn (Pointage $p) => $p->clocked_at->timestamp)->values();
+            /** @var Pointage|null $arrivee */
+            $arrivee = $sorted->firstWhere('type', 'arrivee');
+            /** @var Pointage|null $depart */
+            $depart = $sorted
+                ->filter(fn (Pointage $p) => $p->type === 'depart')
+                ->sortByDesc(fn (Pointage $p) => $p->clocked_at->timestamp)
+                ->first();
+
+            $ref = $arrivee ?? $depart;
+            if ($ref === null) {
+                continue;
+            }
+
+            $base = $this->mapRow($ref);
+            $statutSource = $arrivee ?? $depart;
+            $statutLabel = match ($statutSource?->statut) {
+                'retard' => 'Retard',
+                'ferie_auto' => 'Férié (auto)',
+                'normal' => 'Normal',
+                default => $base['statut_label'],
+            };
+
+            $autoFerie = $sorted->contains(function (Pointage $p): bool {
+                $meta = $p->meta ?? [];
+
+                return ($meta['auto_ferie'] ?? false) === true;
+            });
+
+            $dayMins = $this->heures->minutesJournee($arrivee, $depart);
+
+            $rows[] = [
+                'id' => $ref->id,
+                'user_id' => $ref->user_id,
+                'date' => $base['date'],
+                'date_iso' => $base['date_iso'],
+                'employe' => $base['employe'],
+                'email' => $base['email'],
+                'matricule' => $base['matricule'],
+                'service' => $base['service'],
+                'agence' => $base['agence'],
+                'type' => 'arrivee_depart',
+                'type_label' => 'Arrivée/Départ',
+                'ha_effective' => $arrivee ? $arrivee->heureAffichee() : '—',
+                'ha_reelle' => $arrivee ? $arrivee->heureReelleAffichee() : '—',
+                'hd_effective' => $depart ? $depart->heureAffichee() : '—',
+                'hd_reelle' => $depart ? $depart->heureReelleAffichee() : '—',
+                'total_effective' => $this->heures->formatMinutes($dayMins['effective']),
+                'total_reelle' => $this->heures->formatMinutes($dayMins['reelle']),
+                'total_effective_minutes' => $dayMins['effective'],
+                'total_reelle_minutes' => $dayMins['reelle'],
+                'horodatage' => $base['horodatage'],
+                'qr_verified' => (bool) ($arrivee?->qr_verified || $depart?->qr_verified),
+                'statut' => $statutSource?->statut ?? $base['statut'],
+                'statut_label' => $statutLabel,
+                'auto_ferie' => $autoFerie,
+                'ferie_libelle' => $base['ferie_libelle'],
+            ];
+        }
+
+        return $rows;
     }
 
     /**

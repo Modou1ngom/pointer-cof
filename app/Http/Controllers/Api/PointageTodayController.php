@@ -91,12 +91,25 @@ class PointageTodayController extends Controller
         $heureArriveeAjustee = (string) config('pointage.heure_arrivee_ajustee', $heureArrivee);
         $heureDepartAjustee = (string) config('pointage.heure_depart_ajustee', $heureDepart);
 
-        $ficheRow = app(PointageFicheHorairesService::class)->buildRow(
-            $user,
-            $today->toDateString(),
-            $arriveeAt,
-            $departAt,
-        );
+        $lite = $request->boolean('lite');
+
+        $ficheRow = [
+            'h_arrivee' => '',
+            'h_depart' => '',
+            'h_ajust_arrivee' => '',
+            'h_ajust_depart' => '',
+            'total' => null,
+            'total_ajust_calc' => null,
+            'total_ajust_journee' => null,
+        ];
+        if (! $lite) {
+            $ficheRow = app(PointageFicheHorairesService::class)->buildRow(
+                $user,
+                $today->toDateString(),
+                $arriveeAt,
+                $departAt,
+            );
+        }
 
         $journeeComplete = $arriveeAt !== null && $departAt !== null;
 
@@ -108,38 +121,43 @@ class PointageTodayController extends Controller
             'checkOut' => $checkOutIso,
             'entry' => $arr !== null ? $arr->heureAffichee() : ($arriveeAt?->format('H:i')),
             'exit' => $dep !== null ? $dep->heureAffichee() : ($departAt?->format('H:i')),
-            'entree' => $arr !== null ? $arr->heureAffichee() : ($arriveeAt?->format('H:i')),
-            'sortie' => $dep !== null ? $dep->heureAffichee() : ($departAt?->format('H:i')),
-            'entry_reelle' => $arr !== null ? $arr->heureReelleAffichee() : ($arriveeAt?->format('H:i')),
-            'exit_reelle' => $dep !== null ? $dep->heureReelleAffichee() : ($departAt?->format('H:i')),
-            'h_arrivee' => $ficheRow['h_arrivee'] !== '' ? $ficheRow['h_arrivee'] : null,
-            'h_depart' => $ficheRow['h_depart'] !== '' ? $ficheRow['h_depart'] : null,
-            'h_ajust_arrivee' => $ficheRow['h_ajust_arrivee'] !== '' ? $ficheRow['h_ajust_arrivee'] : null,
-            'h_ajust_depart' => $ficheRow['h_ajust_depart'] !== '' ? $ficheRow['h_ajust_depart'] : null,
-            'heure_arrivee_ajustee' => $heureArriveeAjustee,
-            'heure_depart_ajustee' => $heureDepartAjustee,
-            'journee_complete' => $journeeComplete,
-            'journeeComplete' => $journeeComplete,
-            'total' => $journeeComplete ? $ficheRow['total'] : null,
-            'total_ajust_calc' => $journeeComplete ? $ficheRow['total_ajust_calc'] : null,
-            'total_ajust_journee' => $journeeComplete ? $ficheRow['total_ajust_journee'] : null,
-            'totalAjust' => $journeeComplete ? $ficheRow['total_ajust_calc'] : null,
-            'totalAjustJournee' => $journeeComplete ? $ficheRow['total_ajust_journee'] : null,
             'status' => $status,
             'statut' => $this->statutLabel($status, $isLate),
             'is_late' => $isLate,
             'isLate' => $isLate,
-            'scheduled_arrival' => $heureArrivee,
-            'scheduled_departure' => $heureDepart,
-            'heure_arrivee_prevue' => $heureArrivee,
-            'heure_depart_prevue' => $heureDepart,
-            'source' => $source,
+            'journee_complete' => $journeeComplete,
+            'journeeComplete' => $journeeComplete,
             'synced' => true,
             'office_zone' => MobileApiGeolocation::officeZoneForUser($user),
-            'geolocation' => MobileApiGeolocation::clientHints(),
-            'plages_pointage' => app(PointageHorairesAjustementService::class)->plagesConfigForApi(),
-            'jour_pointage' => PointageJourSemaine::windowInfo($today),
         ];
+
+        if (! $lite) {
+            $payload = array_merge($payload, [
+                'entree' => $payload['entry'],
+                'sortie' => $payload['exit'],
+                'entry_reelle' => $arr !== null ? $arr->heureReelleAffichee() : ($arriveeAt?->format('H:i')),
+                'exit_reelle' => $dep !== null ? $dep->heureReelleAffichee() : ($departAt?->format('H:i')),
+                'h_arrivee' => $ficheRow['h_arrivee'] !== '' ? $ficheRow['h_arrivee'] : null,
+                'h_depart' => $ficheRow['h_depart'] !== '' ? $ficheRow['h_depart'] : null,
+                'h_ajust_arrivee' => $ficheRow['h_ajust_arrivee'] !== '' ? $ficheRow['h_ajust_arrivee'] : null,
+                'h_ajust_depart' => $ficheRow['h_ajust_depart'] !== '' ? $ficheRow['h_ajust_depart'] : null,
+                'heure_arrivee_ajustee' => $heureArriveeAjustee,
+                'heure_depart_ajustee' => $heureDepartAjustee,
+                'total' => $journeeComplete ? $ficheRow['total'] : null,
+                'total_ajust_calc' => $journeeComplete ? $ficheRow['total_ajust_calc'] : null,
+                'total_ajust_journee' => $journeeComplete ? $ficheRow['total_ajust_journee'] : null,
+                'totalAjust' => $journeeComplete ? $ficheRow['total_ajust_calc'] : null,
+                'totalAjustJournee' => $journeeComplete ? $ficheRow['total_ajust_journee'] : null,
+                'scheduled_arrival' => $heureArrivee,
+                'scheduled_departure' => $heureDepart,
+                'heure_arrivee_prevue' => $heureArrivee,
+                'heure_depart_prevue' => $heureDepart,
+                'source' => $source,
+                'geolocation' => MobileApiGeolocation::clientHints(),
+                'plages_pointage' => app(PointageHorairesAjustementService::class)->plagesConfigForApi(),
+                'jour_pointage' => PointageJourSemaine::windowInfo($today),
+            ]);
+        }
 
         return response()->json(array_merge($payload, [
             'data' => $payload,

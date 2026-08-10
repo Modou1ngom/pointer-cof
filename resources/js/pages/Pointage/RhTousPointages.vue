@@ -131,6 +131,7 @@ function statutBadgeClass(statut: string): string {
                         <option value="normal">Normal</option>
                         <option value="retard">Retard</option>
                         <option value="absent">Absent</option>
+                        <option value="justifie">Justifié (déclaration validée)</option>
                     </select>
                 </div>
             </div>
