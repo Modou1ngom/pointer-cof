@@ -134,11 +134,14 @@ class PointageDeclarationController extends Controller
             ->where(function ($q) use ($year, $month): void {
                 $q->where(function ($w) use ($year, $month): void {
                     $w->whereYear('date_concernee', $year)->whereMonth('date_concernee', $month);
-                })->orWhere(function ($w) use ($year, $month): void {
-                    $w->whereNotNull('date_fin')
-                        ->whereYear('date_fin', $year)
-                        ->whereMonth('date_fin', $month);
                 });
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pointage_declarations', 'date_fin')) {
+                    $q->orWhere(function ($w) use ($year, $month): void {
+                        $w->whereNotNull('date_fin')
+                            ->whereYear('date_fin', $year)
+                            ->whereMonth('date_fin', $month);
+                    });
+                }
             });
 
         $type = $request->input('type');
@@ -180,7 +183,7 @@ class PointageDeclarationController extends Controller
             ->map(fn (PointageDeclaration $d) => $this->serializeDeclarationRow($d))
             ->values();
 
-        return Inertia::render('pointage/Demande', [
+        return Inertia::render('Pointage/Demande', [
             'declarations' => $declarations,
             'historique' => $historique,
             'periode_mois' => $mois,

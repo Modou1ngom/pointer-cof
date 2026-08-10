@@ -5,34 +5,50 @@ namespace App\Support;
 use App\Models\PointageDeclaration;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Déclarations RH validées qui couvrent une journée (pas d’absence injustifiée).
  */
 final class PointageDeclarationCouverture
 {
+    private static function hasDateFinColumn(): bool
+    {
+        static $cached = null;
+        if ($cached === null) {
+            $cached = Schema::hasColumn('pointage_declarations', 'date_fin');
+        }
+
+        return (bool) $cached;
+    }
+
     /**
      * @return array{couvert: bool, type?: string, label?: string, declaration_id?: int}
      */
     public static function pourUserJour(int $userId, Carbon $jour): array
     {
         $day = $jour->toDateString();
+        $hasDateFin = self::hasDateFinColumn();
 
         $d = PointageDeclaration::query()
             ->where('user_id', $userId)
             ->where('statut', 'valide')
             ->whereIn('type', PointageDeclarationTypes::TYPES_JUSTIFICATIFS_PRESENCE)
-            ->where(function ($q) use ($day): void {
-                // Plage : début <= jour <= fin
-                $q->where(function ($w) use ($day): void {
-                    $w->whereNotNull('date_fin')
-                        ->whereDate('date_concernee', '<=', $day)
-                        ->whereDate('date_fin', '>=', $day);
-                })->orWhere(function ($w) use ($day): void {
-                    // Jour unique (sans date_fin)
-                    $w->whereNull('date_fin')
-                        ->whereDate('date_concernee', $day);
-                });
+            ->where(function ($q) use ($day, $hasDateFin): void {
+                if ($hasDateFin) {
+                    // Plage : début <= jour <= fin
+                    $q->where(function ($w) use ($day): void {
+                        $w->whereNotNull('date_fin')
+                            ->whereDate('date_concernee', '<=', $day)
+                            ->whereDate('date_fin', '>=', $day);
+                    })->orWhere(function ($w) use ($day): void {
+                        // Jour unique (sans date_fin)
+                        $w->whereNull('date_fin')
+                            ->whereDate('date_concernee', $day);
+                    });
+                } else {
+                    $q->whereDate('date_concernee', $day);
+                }
             })
             ->orderByDesc('id')
             ->first();
@@ -58,19 +74,24 @@ final class PointageDeclarationCouverture
     public static function mapPourUsersJour(array $userIds, Carbon $jour): Collection
     {
         $day = $jour->toDateString();
+        $hasDateFin = self::hasDateFinColumn();
         $decls = PointageDeclaration::query()
             ->whereIn('user_id', $userIds ?: [0])
             ->where('statut', 'valide')
             ->whereIn('type', PointageDeclarationTypes::TYPES_JUSTIFICATIFS_PRESENCE)
-            ->where(function ($q) use ($day): void {
-                $q->where(function ($w) use ($day): void {
-                    $w->whereNotNull('date_fin')
-                        ->whereDate('date_concernee', '<=', $day)
-                        ->whereDate('date_fin', '>=', $day);
-                })->orWhere(function ($w) use ($day): void {
-                    $w->whereNull('date_fin')
-                        ->whereDate('date_concernee', $day);
-                });
+            ->where(function ($q) use ($day, $hasDateFin): void {
+                if ($hasDateFin) {
+                    $q->where(function ($w) use ($day): void {
+                        $w->whereNotNull('date_fin')
+                            ->whereDate('date_concernee', '<=', $day)
+                            ->whereDate('date_fin', '>=', $day);
+                    })->orWhere(function ($w) use ($day): void {
+                        $w->whereNull('date_fin')
+                            ->whereDate('date_concernee', $day);
+                    });
+                } else {
+                    $q->whereDate('date_concernee', $day);
+                }
             })
             ->orderByDesc('id')
             ->get()
@@ -103,13 +124,16 @@ final class PointageDeclarationCouverture
     {
         $fromDay = $from->toDateString();
         $toDay = $to->toDateString();
+        $hasDateFin = self::hasDateFinColumn();
 
-        $decls = PointageDeclaration::query()
+        $query = PointageDeclaration::query()
             ->where('user_id', $userId)
             ->where('statut', 'valide')
             ->whereIn('type', PointageDeclarationTypes::TYPES_JUSTIFICATIFS_PRESENCE)
-            ->whereDate('date_concernee', '<=', $toDay)
-            ->where(function ($q) use ($fromDay): void {
+            ->whereDate('date_concernee', '<=', $toDay);
+
+        if ($hasDateFin) {
+            $query->where(function ($q) use ($fromDay): void {
                 $q->where(function ($w) use ($fromDay): void {
                     $w->whereNotNull('date_fin')
                         ->whereDate('date_fin', '>=', $fromDay);
@@ -117,9 +141,14 @@ final class PointageDeclarationCouverture
                     $w->whereNull('date_fin')
                         ->whereDate('date_concernee', '>=', $fromDay);
                 });
-            })
-            ->orderByDesc('id')
-            ->get(['id', 'type', 'date_concernee', 'date_fin']);
+            });
+            $decls = $query->orderByDesc('id')->get(['id', 'type', 'date_concernee', 'date_fin']);
+        } else {
+            $decls = $query
+                ->whereDate('date_concernee', '>=', $fromDay)
+                ->orderByDesc('id')
+                ->get(['id', 'type', 'date_concernee']);
+        }
 
         $out = [];
         foreach ($decls as $d) {
