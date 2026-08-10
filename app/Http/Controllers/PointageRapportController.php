@@ -6,15 +6,20 @@ use App\Models\Agence;
 use App\Models\Departement;
 use App\Models\Pointage;
 use App\Models\PointageDeclaration;
+use App\Models\PointageHoraireProfile;
 use App\Models\Profil;
 use App\Models\User;
 use App\Services\Pointage\PointageHeuresCalculService;
+use App\Services\Pointage\PointageHorairesCalendrierService;
 use App\Services\Pointage\PointageRecuperationService;
 use App\Support\FrenchDateFormat;
+use App\Support\PointageDeclarationCouverture;
+use App\Support\PointageDeclarationTypes;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
@@ -35,22 +40,28 @@ class PointageRapportController extends Controller
         abort_unless($user && ($user->isRh() || $user->isAdmin() || $user->isSuperAdmin()), 403);
 
         $today = Carbon::today();
+        $filters = [
+            'date' => $request->input('date', $today->toDateString()),
+            'mois' => $request->input('mois', $today->format('Y-m')),
+            'annee' => $request->input('annee', $today->format('Y')),
+            'date_debut' => $request->input('date_debut', $today->copy()->startOfMonth()->toDateString()),
+            'date_fin' => $request->input('date_fin', $today->toDateString()),
+            'agence_id' => $request->filled('agence_id') ? (int) $request->input('agence_id') : null,
+            'departement' => $request->filled('departement') ? (string) $request->input('departement') : null,
+            'user_id' => $request->filled('user_id') ? (int) $request->input('user_id') : null,
+            'statut' => $request->filled('statut') ? (string) $request->input('statut') : null,
+            'format' => 'csv',
+        ];
+
+        $dateRef = Carbon::parse($filters['date'])->startOfDay();
 
         return Inertia::render('Pointage/ReportingRh', [
-            'defaults' => [
-                'date' => $today->toDateString(),
-                'mois' => $today->format('Y-m'),
-                'date_debut' => $today->copy()->startOfMonth()->toDateString(),
-                'date_fin' => $today->toDateString(),
-                'agence_id' => null,
-                'departement' => null,
-                'user_id' => null,
-                'format' => 'csv',
-            ],
+            'defaults' => $filters,
             'rapports' => $this->rapportsCatalog(),
             'agences' => Agence::query()->where('actif', true)->orderBy('nom')->get(['id', 'nom']),
             'departements' => Departement::query()->where('actif', true)->orderBy('nom')->pluck('nom')->values(),
             'collaborateurs' => $this->collaborateursOptions(),
+            'dashboard' => $this->buildReportingDashboard($dateRef, $filters),
         ]);
     }
 
@@ -64,6 +75,7 @@ class PointageRapportController extends Controller
             'format' => 'nullable|in:csv,pdf',
             'date' => 'nullable|date',
             'mois' => 'nullable|string|regex:/^\d{4}-\d{2}$/',
+            'annee' => 'nullable|string|regex:/^\d{4}$/',
             'date_debut' => 'nullable|date',
             'date_fin' => 'nullable|date',
             'agence_id' => 'nullable|integer',
@@ -115,64 +127,109 @@ class PointageRapportController extends Controller
     }
 
     /**
-     * @return list<array{id: string, title: string, description: string, period: string}>
+     * @return list<array{id: string, title: string, description: string, period: string, icon: string, color: string, featured: bool}>
      */
     private function rapportsCatalog(): array
     {
         return [
             [
                 'id' => 'quotidien',
-                'title' => 'Rapport quotidien de présence',
-                'description' => 'Présences du jour : arrivées, départs, retards.',
+                'title' => 'Rapport quotidien',
+                'description' => 'Présences du jour : heures effectives, retards, départs anticipés, absences.',
                 'period' => 'date',
+                'icon' => 'calendar-day',
+                'color' => 'blue',
+                'featured' => true,
+            ],
+            [
+                'id' => 'hebdomadaire',
+                'title' => 'Rapport hebdomadaire',
+                'description' => 'Synthèse de la semaine : présences, absences, retards, départs anticipés.',
+                'period' => 'semaine',
+                'icon' => 'calendar-week',
+                'color' => 'green',
+                'featured' => true,
             ],
             [
                 'id' => 'mensuel',
-                'title' => 'Rapport mensuel de pointage',
-                'description' => 'Synthèse mensuelle heures, retards, absences, heures sup.',
+                'title' => 'Rapport mensuel',
+                'description' => 'Synthèse mensuelle : présences, absences, retards, départs anticipés, heures.',
                 'period' => 'mois',
+                'icon' => 'calendar-month',
+                'color' => 'purple',
+                'featured' => true,
+            ],
+            [
+                'id' => 'annuel',
+                'title' => 'Rapport annuel',
+                'description' => 'Synthèse année : effectif, taux de présence / absence, retards et congés.',
+                'period' => 'annee',
+                'icon' => 'calendar-range',
+                'color' => 'orange',
+                'featured' => true,
             ],
             [
                 'id' => 'absences',
-                'title' => 'Rapport des absences',
+                'title' => 'Rapport absences',
                 'description' => 'Déclarations d’absence sur la période.',
                 'period' => 'range',
+                'icon' => 'user-x',
+                'color' => 'red',
+                'featured' => true,
             ],
             [
                 'id' => 'retards',
-                'title' => 'Rapport des retards',
+                'title' => 'Rapport retards',
                 'description' => 'Pointages d’arrivée en retard.',
                 'period' => 'range',
+                'icon' => 'clock',
+                'color' => 'orange',
+                'featured' => true,
             ],
             [
                 'id' => 'heures_sup',
-                'title' => 'Rapport des heures supplémentaires',
+                'title' => 'Rapport heures sup.',
                 'description' => 'Estimation des heures supplémentaires par collaborateur.',
                 'period' => 'mois',
+                'icon' => 'timer',
+                'color' => 'teal',
+                'featured' => true,
             ],
             [
                 'id' => 'anomalies',
-                'title' => 'Rapport des anomalies',
+                'title' => 'Rapport anomalies',
                 'description' => 'Entrées sans sortie, QR non validé, biométrie manquante.',
                 'period' => 'range',
+                'icon' => 'alert',
+                'color' => 'purple',
+                'featured' => true,
             ],
             [
                 'id' => 'agence',
                 'title' => 'Rapport par agence',
-                'description' => 'Volumes et retards agrégés par site.',
+                'description' => 'Effectif, présences, absences, congés, missions et taux par site.',
                 'period' => 'range',
+                'icon' => 'building',
+                'color' => 'blue',
+                'featured' => false,
             ],
             [
                 'id' => 'departement',
                 'title' => 'Rapport par département',
-                'description' => 'Volumes et retards agrégés par service.',
+                'description' => 'Effectif, présences, absences, congés, missions et taux par direction.',
                 'period' => 'range',
+                'icon' => 'users',
+                'color' => 'green',
+                'featured' => false,
             ],
             [
                 'id' => 'individuel',
-                'title' => 'Rapport individuel par collaborateur',
+                'title' => 'Rapport individuel',
                 'description' => 'Détail des pointages d’un collaborateur.',
                 'period' => 'range_user',
+                'icon' => 'user',
+                'color' => 'purple',
+                'featured' => false,
             ],
         ];
     }
@@ -183,11 +240,13 @@ class PointageRapportController extends Controller
      */
     private function buildRapportPayload(string $type, array $filters, PointageRecuperationService $recuperation): array
     {
-        [$from, $to, $date, $mois] = $this->resolvePeriod($filters);
+        [$from, $to, $date, $mois, $annee] = $this->resolvePeriod($filters);
 
         return match ($type) {
             'quotidien' => $this->rapportQuotidien($date, $filters, $recuperation),
+            'hebdomadaire' => $this->rapportHebdomadaire($date, $filters),
             'mensuel' => $this->rapportMensuel($mois, $filters),
+            'annuel' => $this->rapportAnnuel($annee, $filters),
             'absences' => $this->rapportAbsences($from, $to, $filters),
             'retards' => $this->rapportRetards($from, $to, $filters),
             'heures_sup' => $this->rapportHeuresSup($mois, $filters),
@@ -201,7 +260,7 @@ class PointageRapportController extends Controller
 
     /**
      * @param  array<string, mixed>  $filters
-     * @return array{0: Carbon, 1: Carbon, 2: Carbon, 3: string}
+     * @return array{0: Carbon, 1: Carbon, 2: Carbon, 3: string, 4: string}
      */
     private function resolvePeriod(array $filters): array
     {
@@ -209,45 +268,193 @@ class PointageRapportController extends Controller
         $mois = is_string($filters['mois'] ?? null) && preg_match('/^\d{4}-\d{2}$/', $filters['mois'])
             ? $filters['mois']
             : $date->format('Y-m');
+        $annee = is_string($filters['annee'] ?? null) && preg_match('/^\d{4}$/', $filters['annee'])
+            ? $filters['annee']
+            : substr($mois, 0, 4);
         $from = Carbon::parse($filters['date_debut'] ?? $date->copy()->startOfMonth()->toDateString())->startOfDay();
         $to = Carbon::parse($filters['date_fin'] ?? $date->toDateString())->endOfDay();
         if ($to->lt($from)) {
             [$from, $to] = [$to->copy()->startOfDay(), $from->copy()->endOfDay()];
         }
 
-        return [$from, $to, $date, $mois];
+        return [$from, $to, $date, $mois, $annee];
     }
 
     /**
+     * Template reporting quotidien :
+     * Matricule | Employé | Direction | Date | Heure entrée | Heure sortie | Retard | Départ anticipé | Absence | Statut
+     * Heure entrée / sortie = heures effectives.
+     * Départ anticipé = Oui si heure de sortie effective < heure_depart (défaut 17:00).
+     *
      * @param  array<string, mixed>  $filters
      * @return array{title: string, headers: list<string>, rows: list<list<string>>}
      */
     private function rapportQuotidien(Carbon $date, array $filters, PointageRecuperationService $recuperation): array
     {
-        $q = Pointage::query()
-            ->with(['user.profil', 'agence'])
-            ->whereDate('clocked_at', $date->toDateString())
-            ->orderBy('clocked_at');
-        $this->applyCommonFilters($q, $filters);
+        $userIds = $this->filteredUserIds($filters);
+        $users = User::query()
+            ->with('profil')
+            ->whereIn('id', $userIds ?: [0])
+            ->orderBy('name')
+            ->get();
 
-        $rows = $recuperation->mapExportJourneeRows($q->get());
+        $pointagesByUser = Pointage::query()
+            ->whereIn('user_id', $userIds ?: [0])
+            ->whereDate('clocked_at', $date->toDateString())
+            ->orderBy('clocked_at')
+            ->get()
+            ->groupBy('user_id');
+
+        $justifs = PointageDeclarationCouverture::mapPourUsersJour($userIds, $date);
+
+        $heureArriveeRef = $this->hhmmToMinutes((string) config('pointage.heure_arrivee', '08:00'));
+        $heureDepartRef = $this->hhmmToMinutes((string) config('pointage.heure_depart', '17:00'));
+        $dateLabel = $date->format('d/m/Y');
+
+        $rows = [];
+        foreach ($users as $user) {
+            /** @var Collection<int, Pointage> $items */
+            $items = $pointagesByUser->get($user->id) ?? collect();
+            $arrivee = $items->firstWhere('type', 'arrivee');
+            $depart = $items
+                ->filter(fn (Pointage $p) => $p->type === 'depart')
+                ->sortByDesc(fn (Pointage $p) => $p->clocked_at->timestamp)
+                ->first();
+
+            $profil = $user->profil;
+            $employe = $profil
+                ? trim(($profil->prenom ?? '').' '.($profil->nom ?? ''))
+                : (string) ($user->full_name ?: $user->name ?: '—');
+            if ($employe === '') {
+                $employe = '—';
+            }
+
+            $ha = $arrivee ? $this->heureEffectiveColon($arrivee) : '—';
+            $hd = $depart ? $this->heureEffectiveColon($depart) : '—';
+
+            $retard = '—';
+            if ($arrivee !== null) {
+                $effMins = $this->effectiveMinutes($arrivee);
+                $delta = max(0, $effMins - $heureArriveeRef);
+                $retard = sprintf('%02d min', $delta);
+            }
+
+            $departAnticipe = '—';
+            if ($depart !== null) {
+                $departAnticipe = $this->effectiveMinutes($depart) < $heureDepartRef ? 'Oui' : 'Non';
+            }
+
+            $isAbsent = $arrivee === null && $depart === null;
+            $justif = $justifs->get($user->id) ?? ['couvert' => false];
+
+            if ($isAbsent && ($justif['couvert'] ?? false)) {
+                $absence = 'Non';
+                $statut = (string) ($justif['label'] ?? 'Justifié');
+            } elseif ($isAbsent) {
+                $absence = 'Oui';
+                $statut = 'Absent';
+            } else {
+                $absence = 'Non';
+                if (($arrivee?->statut ?? null) === 'retard' || ($arrivee !== null && $this->effectiveMinutes($arrivee) > $heureArriveeRef)) {
+                    $statut = 'Retard';
+                } elseif (($arrivee?->statut ?? null) === 'ferie_auto' || ($depart?->statut ?? null) === 'ferie_auto') {
+                    $statut = 'Férié';
+                } else {
+                    $statut = 'Présent';
+                }
+            }
+
+            $rows[] = [
+                (string) ($profil?->matricule ?: '—'),
+                $employe,
+                (string) ($profil?->departement ?: '—'),
+                $dateLabel,
+                $ha,
+                $hd,
+                $retard,
+                $departAnticipe,
+                $absence,
+                $statut,
+            ];
+        }
 
         return [
             'title' => 'Rapport quotidien de présence — '.FrenchDateFormat::date($date),
             'headers' => [
-                'Date', 'Employé', 'Email', 'Matricule', 'Service', 'Agence',
-                'H.A. effective', 'H.D. effective',
-                'Total H.effective', 'Statut',
+                'Matricule', 'Employé', 'Direction', 'Date',
+                'Heure entrée', 'Heure sortie', 'Retard',
+                'Départ anticipé', 'Absence', 'Statut',
             ],
-            'rows' => array_map(fn (array $r) => [
-                $r['date'], $r['employe'], $r['email'], $r['matricule'], $r['service'], $r['agence'],
-                $r['ha_effective'], $r['hd_effective'],
-                $r['total_effective'], $r['statut_label'],
-            ], $rows),
+            'rows' => $rows,
         ];
     }
 
+    private function heureEffectiveColon(Pointage $p): string
+    {
+        $meta = $p->meta ?? [];
+        if (is_string($meta['heure_effective'] ?? null) && $meta['heure_effective'] !== '') {
+            return $this->normalizeHhmmColon((string) $meta['heure_effective']);
+        }
+
+        return $p->clocked_at?->format('H:i') ?? '—';
+    }
+
+    private function effectiveMinutes(Pointage $p): int
+    {
+        $meta = $p->meta ?? [];
+        if (is_string($meta['heure_effective'] ?? null) && $meta['heure_effective'] !== '') {
+            return $this->hhmmToMinutes((string) $meta['heure_effective']);
+        }
+
+        if ($p->clocked_at === null) {
+            return 0;
+        }
+
+        return ((int) $p->clocked_at->format('H')) * 60 + (int) $p->clocked_at->format('i');
+    }
+
+    private function hhmmToMinutes(string $hhmm): int
+    {
+        $clean = str_replace(['h', 'H'], ':', trim($hhmm));
+        $parts = explode(':', $clean);
+
+        return ((int) ($parts[0] ?? 0)) * 60 + (int) ($parts[1] ?? 0);
+    }
+
+    private function normalizeHhmmColon(string $hhmm): string
+    {
+        $mins = $this->hhmmToMinutes($hhmm);
+
+        return sprintf('%02d:%02d', intdiv($mins, 60), $mins % 60);
+    }
+
     /**
+     * Template reporting hebdomadaire (mêmes colonnes que le mensuel, période = semaine ISO).
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{title: string, headers: list<string>, rows: list<list<string>>}
+     */
+    private function rapportHebdomadaire(Carbon $date, array $filters): array
+    {
+        $weekStart = $date->copy()->startOfWeek(Carbon::MONDAY)->startOfDay();
+        $weekEnd = $date->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
+        $label = FrenchDateFormat::date($weekStart).' → '.FrenchDateFormat::date($weekEnd);
+
+        return $this->rapportSynthesePeriode(
+            $weekStart,
+            $weekEnd,
+            $filters,
+            'Rapport hebdomadaire de pointage — '.$label,
+        );
+    }
+
+    /**
+     * Template reporting mensuel :
+     * Employé | Jours travaillés | Présences | Absences | Retards | Départs anticipés | Heures travaillées
+     * (Heures supplémentaires exclues — barrées sur le template métier.)
+     * Heures travaillées = heures effectives.
+     * Départ anticipé = sortie effective avant heure_depart (défaut 17:00).
+     *
      * @param  array<string, mixed>  $filters
      * @return array{title: string, headers: list<string>, rows: list<list<string>>}
      */
@@ -255,24 +462,446 @@ class PointageRapportController extends Controller
     {
         $monthStart = Carbon::createFromFormat('Y-m-d', $mois.'-01')->startOfMonth();
         $monthEnd = $monthStart->copy()->endOfMonth()->endOfDay();
+
+        return $this->rapportSynthesePeriode(
+            $monthStart,
+            $monthEnd,
+            $filters,
+            'Rapport mensuel de pointage — '.$mois,
+        );
+    }
+
+    /**
+     * Template reporting annuel :
+     * Mois | Effectif moyen | Taux présence | Taux absence | Retards | Congés
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{title: string, headers: list<string>, rows: list<list<string>>}
+     */
+    private function rapportAnnuel(string $annee, array $filters): array
+    {
+        $year = (int) $annee;
+        $yearStart = Carbon::create($year, 1, 1)->startOfDay();
+        $yearEnd = Carbon::create($year, 12, 31)->endOfDay();
+
         $userIds = $this->filteredUserIds($filters);
-        $rows = $this->rapportRhLignesEmployes($monthStart, $monthEnd, $userIds)->sortBy('nom')->values();
+        $effectif = count($userIds);
+
+        $pointagesByUser = Pointage::query()
+            ->whereIn('user_id', $userIds ?: [0])
+            ->whereBetween('clocked_at', [$yearStart, $yearEnd])
+            ->orderBy('clocked_at')
+            ->get()
+            ->groupBy('user_id');
+
+        $declsByUser = $this->declarationsValidesParUser($userIds, $yearStart, $yearEnd);
+
+        $moisNoms = [
+            1 => 'Janvier', 2 => 'Février', 3 => 'Mars', 4 => 'Avril',
+            5 => 'Mai', 6 => 'Juin', 7 => 'Juillet', 8 => 'Août',
+            9 => 'Septembre', 10 => 'Octobre', 11 => 'Novembre', 12 => 'Décembre',
+        ];
+
+        $rows = [];
+        for ($m = 1; $m <= 12; $m++) {
+            $monthStart = Carbon::create($year, $m, 1)->startOfDay();
+            $monthEnd = $monthStart->copy()->endOfMonth()->endOfDay();
+            $joursOuvres = $this->joursOuvresDansPeriode($monthStart, $monthEnd);
+            $joursOuvresSet = array_fill_keys($joursOuvres, true);
+            $joursCount = count($joursOuvres);
+
+            $presences = 0;
+            $retards = 0;
+            $conges = 0;
+
+            foreach ($userIds as $uid) {
+                /** @var Collection<int, Pointage> $events */
+                $events = $pointagesByUser->get($uid) ?? collect();
+                $byDay = $events
+                    ->filter(fn (Pointage $p) => $p->clocked_at->between($monthStart, $monthEnd))
+                    ->groupBy(fn (Pointage $p) => $p->clocked_at->format('Y-m-d'));
+
+                $coverage = $this->declarationCoverageByDay(
+                    $declsByUser->get($uid) ?? collect(),
+                    $joursOuvresSet,
+                );
+
+                foreach ($joursOuvres as $day) {
+                    /** @var Collection<int, Pointage> $items */
+                    $items = $byDay->get($day) ?? collect();
+                    $arrivee = $items->firstWhere('type', 'arrivee');
+                    $depart = $items
+                        ->filter(fn (Pointage $p) => $p->type === 'depart')
+                        ->sortByDesc(fn (Pointage $p) => $p->clocked_at->timestamp)
+                        ->first();
+
+                    if ($arrivee !== null || $depart !== null) {
+                        $presences++;
+                        if ($arrivee !== null && $arrivee->statut === 'retard') {
+                            $retards++;
+                        }
+
+                        continue;
+                    }
+
+                    if (($coverage[$day] ?? null) === 'conge') {
+                        $conges++;
+                    }
+                }
+            }
+
+            $tauxPresence = $effectif > 0 && $joursCount > 0
+                ? (int) round(100 * $presences / ($effectif * $joursCount))
+                : 0;
+            $tauxAbsence = max(0, 100 - $tauxPresence);
+
+            $rows[] = [
+                $moisNoms[$m],
+                (string) $effectif,
+                $tauxPresence.' %',
+                $tauxAbsence.' %',
+                (string) $retards,
+                (string) $conges,
+            ];
+        }
 
         return [
-            'title' => 'Rapport mensuel de pointage — '.$mois,
+            'title' => 'Rapport annuel de pointage — '.$annee,
             'headers' => [
-                'Employé', 'Total H.effective', 'Retards',
-                'Absences (validées)', 'Heures sup. (effective)', 'Pénalités (FCFA)',
+                'Mois', 'Effectif moyen', 'Taux présence', 'Taux absence', 'Retards', 'Congés',
             ],
-            'rows' => $rows->map(fn (array $r) => [
-                $r['nom'],
-                $r['heures_effective'],
-                (string) $r['retards'],
-                (string) $r['absences'],
-                $r['heures_sup_label'],
-                $r['penalites_fcfa'] > 0 ? '-'.number_format($r['penalites_fcfa'], 0, ',', ' ') : '—',
-            ])->all(),
+            'rows' => $rows,
         ];
+    }
+
+    /**
+     * Synthèse présence sur une période (hebdo / mensuel).
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{title: string, headers: list<string>, rows: list<list<string>>}
+     */
+    private function rapportSynthesePeriode(Carbon $from, Carbon $to, array $filters, string $title): array
+    {
+        $userIds = $this->filteredUserIds($filters);
+
+        $users = User::query()
+            ->with('profil')
+            ->whereIn('id', $userIds ?: [0])
+            ->orderBy('name')
+            ->get();
+
+        $joursOuvres = $this->joursOuvresDansPeriode($from, $to);
+        $joursTravailles = count($joursOuvres);
+        $heureDepartRef = $this->hhmmToMinutes((string) config('pointage.heure_depart', '17:00'));
+
+        $pointagesByUser = Pointage::query()
+            ->whereIn('user_id', $userIds ?: [0])
+            ->whereBetween('clocked_at', [$from, $to])
+            ->orderBy('clocked_at')
+            ->get()
+            ->groupBy('user_id');
+
+        $rows = [];
+        foreach ($users as $user) {
+            $profil = $user->profil;
+            $employe = $profil
+                ? trim(($profil->prenom ?? '').' '.($profil->nom ?? ''))
+                : (string) ($user->full_name ?: $user->name ?: '—');
+            if ($employe === '') {
+                $employe = '—';
+            }
+
+            /** @var Collection<int, Pointage> $events */
+            $events = $pointagesByUser->get($user->id) ?? collect();
+            $byDay = $events->groupBy(fn (Pointage $p) => $p->clocked_at->format('Y-m-d'));
+
+            $presences = 0;
+            $retards = 0;
+            $departsAnticipes = 0;
+
+            foreach ($joursOuvres as $day) {
+                /** @var Collection<int, Pointage> $items */
+                $items = $byDay->get($day) ?? collect();
+                $arrivee = $items->firstWhere('type', 'arrivee');
+                $depart = $items
+                    ->filter(fn (Pointage $p) => $p->type === 'depart')
+                    ->sortByDesc(fn (Pointage $p) => $p->clocked_at->timestamp)
+                    ->first();
+
+                if ($arrivee === null && $depart === null) {
+                    continue;
+                }
+
+                $presences++;
+
+                if ($arrivee !== null && $arrivee->statut === 'retard') {
+                    $retards++;
+                }
+                if ($depart !== null && $this->effectiveMinutes($depart) < $heureDepartRef) {
+                    $departsAnticipes++;
+                }
+            }
+
+            $absences = max(0, $joursTravailles - $presences);
+            $mins = $this->heures->minutesFromCollection($events);
+
+            $rows[] = [
+                $employe,
+                (string) $joursTravailles,
+                (string) $presences,
+                (string) $absences,
+                (string) $retards,
+                (string) $departsAnticipes,
+                $this->heures->formatMinutes($mins['effective']),
+            ];
+        }
+
+        usort($rows, fn (array $a, array $b) => strcasecmp($a[0], $b[0]));
+
+        return [
+            'title' => $title,
+            'headers' => [
+                'Employé', 'Jours travaillés', 'Présences', 'Absences',
+                'Retards', 'Départs anticipés', 'Heures travaillées',
+            ],
+            'rows' => $rows,
+        ];
+    }
+
+    /**
+     * Snapshot dashboard Reporting RH pour une date de référence.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array<string, mixed>
+     */
+    private function buildReportingDashboard(Carbon $dateRef, array $filters): array
+    {
+        $userIds = $this->filteredUserIds($filters);
+        $effectif = count($userIds);
+        $yesterday = $dateRef->copy()->subDay();
+
+        $todayStats = $this->dayPresenceStats($dateRef, $userIds);
+        $yestStats = $this->dayPresenceStats($yesterday, $userIds);
+
+        $presentsPct = $effectif > 0 ? (int) round(100 * $todayStats['presents'] / $effectif) : 0;
+        $yestPresentsPct = $effectif > 0 ? (int) round(100 * $yestStats['presents'] / $effectif) : 0;
+
+        $monthStart = $dateRef->copy()->startOfMonth();
+        $monthEnd = $dateRef->copy()->endOfMonth()->endOfDay();
+        $heuresSupMinutes = 0;
+        foreach ($userIds as $uid) {
+            $mins = $this->heures->minutesUserBetween((int) $uid, $monthStart, $monthEnd);
+            $sup = $this->heures->heuresSupplementaires($mins['effective'], $mins['jours_complets']);
+            $heuresSupMinutes += $sup['minutes'];
+        }
+
+        $prevMonthStart = $dateRef->copy()->subMonthNoOverflow()->startOfMonth();
+        $prevMonthEnd = $dateRef->copy()->subMonthNoOverflow()->endOfMonth()->endOfDay();
+        $prevSupMinutes = 0;
+        foreach ($userIds as $uid) {
+            $mins = $this->heures->minutesUserBetween((int) $uid, $prevMonthStart, $prevMonthEnd);
+            $sup = $this->heures->heuresSupplementaires($mins['effective'], $mins['jours_complets']);
+            $prevSupMinutes += $sup['minutes'];
+        }
+
+        $evolution = [];
+        for ($i = 6; $i >= 0; $i--) {
+            $d = $dateRef->copy()->subDays($i);
+            $s = $this->dayPresenceStats($d, $userIds);
+            $taux = $effectif > 0 ? (int) round(100 * $s['presents'] / $effectif) : 0;
+            $evolution[] = [
+                'date' => $d->toDateString(),
+                'label' => $d->translatedFormat('d M'),
+                'taux' => $taux,
+            ];
+        }
+
+        $byDept = $this->presenceParDepartementPourJour($dateRef, $userIds);
+        $alertes = $todayStats['retards'] + $todayStats['absents'];
+
+        return [
+            'date_label' => FrenchDateFormat::dateLong($dateRef),
+            'kpis' => [
+                'effectif' => $effectif,
+                'effectif_delta' => 0,
+                'presents' => $todayStats['presents'],
+                'presents_pct' => $presentsPct,
+                'presents_delta_pct' => $presentsPct - $yestPresentsPct,
+                'retards' => $todayStats['retards'],
+                'retards_delta_pct' => $this->pctDelta($todayStats['retards'], $yestStats['retards']),
+                'absents' => $todayStats['absents'],
+                'absents_delta_pct' => $this->pctDelta($todayStats['absents'], $yestStats['absents']),
+                'conges' => $todayStats['conges'],
+                'conges_delta' => $todayStats['conges'] - $yestStats['conges'],
+                'missions' => $todayStats['missions'],
+                'missions_delta' => $todayStats['missions'] - $yestStats['missions'],
+                'heures_sup' => $this->heures->formatMinutes($heuresSupMinutes),
+                'heures_sup_delta' => $this->heures->formatMinutes($heuresSupMinutes - $prevSupMinutes),
+                'heures_sup_delta_positive' => ($heuresSupMinutes - $prevSupMinutes) >= 0,
+            ],
+            'evolution_7j' => $evolution,
+            'presence_departements' => $byDept,
+            'repartition' => [
+                'total' => $effectif,
+                'presents' => $todayStats['presents'],
+                'presents_pct' => $presentsPct,
+                'absents' => $todayStats['absents'],
+                'absents_pct' => $effectif > 0 ? round(100 * $todayStats['absents'] / $effectif, 1) : 0,
+                'conges' => $todayStats['conges'],
+                'conges_pct' => $effectif > 0 ? round(100 * $todayStats['conges'] / $effectif, 1) : 0,
+                'missions' => $todayStats['missions'],
+                'missions_pct' => $effectif > 0 ? round(100 * $todayStats['missions'] / $effectif, 1) : 0,
+            ],
+            'alertes' => $alertes,
+        ];
+    }
+
+    private function pctDelta(int $current, int $previous): float
+    {
+        if ($previous <= 0) {
+            return $current > 0 ? 100.0 : 0.0;
+        }
+
+        return round((($current - $previous) / $previous) * 100, 1);
+    }
+
+    /**
+     * @param  list<int>  $userIds
+     * @return array{presents: int, retards: int, absents: int, conges: int, missions: int}
+     */
+    private function dayPresenceStats(Carbon $day, array $userIds): array
+    {
+        $joursSet = [$day->toDateString() => true];
+        $isOuvre = in_array($day->toDateString(), $this->joursOuvresDansPeriode($day, $day), true);
+
+        $pointagesByUser = Pointage::query()
+            ->whereIn('user_id', $userIds ?: [0])
+            ->whereDate('clocked_at', $day->toDateString())
+            ->orderBy('clocked_at')
+            ->get()
+            ->groupBy('user_id');
+
+        $declsByUser = $this->declarationsValidesParUser($userIds, $day, $day);
+
+        $presents = 0;
+        $retards = 0;
+        $absents = 0;
+        $conges = 0;
+        $missions = 0;
+
+        foreach ($userIds as $uid) {
+            /** @var Collection<int, Pointage> $items */
+            $items = $pointagesByUser->get($uid) ?? collect();
+            $arrivee = $items->firstWhere('type', 'arrivee');
+            $depart = $items
+                ->filter(fn (Pointage $p) => $p->type === 'depart')
+                ->sortByDesc(fn (Pointage $p) => $p->clocked_at->timestamp)
+                ->first();
+
+            if ($arrivee !== null || $depart !== null) {
+                $presents++;
+                if ($arrivee !== null && $arrivee->statut === 'retard') {
+                    $retards++;
+                }
+
+                continue;
+            }
+
+            if (! $isOuvre) {
+                continue;
+            }
+
+            $coverage = $this->declarationCoverageByDay(
+                $declsByUser->get($uid) ?? collect(),
+                $joursSet,
+            );
+            $kind = $coverage[$day->toDateString()] ?? null;
+            if ($kind === 'mission') {
+                $missions++;
+            } elseif ($kind === 'conge') {
+                $conges++;
+            } else {
+                $absents++;
+            }
+        }
+
+        return compact('presents', 'retards', 'absents', 'conges', 'missions');
+    }
+
+    /**
+     * @param  list<int>  $userIds
+     * @return list<array{nom: string, taux: int}>
+     */
+    private function presenceParDepartementPourJour(Carbon $day, array $userIds): array
+    {
+        $users = User::query()
+            ->with('profil')
+            ->whereIn('id', $userIds ?: [0])
+            ->get();
+
+        $pointagesByUser = Pointage::query()
+            ->whereIn('user_id', $userIds ?: [0])
+            ->whereDate('clocked_at', $day->toDateString())
+            ->get()
+            ->groupBy('user_id');
+
+        /** @var array<string, array{effectif: int, presents: int}> $groups */
+        $groups = [];
+        foreach ($users as $user) {
+            $dept = (string) ($user->profil?->departement ?: 'Sans direction');
+            if (! isset($groups[$dept])) {
+                $groups[$dept] = ['effectif' => 0, 'presents' => 0];
+            }
+            $groups[$dept]['effectif']++;
+            $items = $pointagesByUser->get($user->id) ?? collect();
+            if ($items->isNotEmpty()) {
+                $groups[$dept]['presents']++;
+            }
+        }
+
+        $out = [];
+        foreach ($groups as $nom => $g) {
+            $out[] = [
+                'nom' => $nom,
+                'taux' => $g['effectif'] > 0 ? (int) round(100 * $g['presents'] / $g['effectif']) : 0,
+            ];
+        }
+        usort($out, fn ($a, $b) => $b['taux'] <=> $a['taux']);
+
+        return array_slice($out, 0, 6);
+    }
+
+    /**
+     * Jours ouvrés attendus sur la période (hors week-end profil / fériés chômés).
+     *
+     * @return list<string> dates Y-m-d
+     */
+    private function joursOuvresDansPeriode(Carbon $from, Carbon $to): array
+    {
+        $calendrier = app(PointageHorairesCalendrierService::class);
+        $profile = PointageHoraireProfile::query()
+            ->where('scope_type', 'global')
+            ->where('actif', true)
+            ->orderBy('id')
+            ->first()
+            ?? PointageHoraireProfile::query()->orderBy('id')->first();
+
+        $feries = $profile !== null ? $calendrier->feriesChargees() : null;
+        $out = [];
+        $d = $from->copy()->startOfDay();
+        $end = $to->copy()->startOfDay();
+        while ($d->lte($end)) {
+            if ($profile === null) {
+                if (! $d->isWeekend()) {
+                    $out[] = $d->toDateString();
+                }
+            } elseif ($calendrier->jourCompteDansBasePresence($d, $profile, $feries)) {
+                $out[] = $d->toDateString();
+            }
+            $d->addDay();
+        }
+
+        return $out;
     }
 
     /**
@@ -434,74 +1063,228 @@ class PointageRapportController extends Controller
     }
 
     /**
+     * Template : Agence | Effectif | Présences | Absences | Congés | Missions | Retards | Taux présence
+     *
      * @param  array<string, mixed>  $filters
      * @return array{title: string, headers: list<string>, rows: list<list<string>>}
      */
     private function rapportParAgence(Carbon $from, Carbon $to, array $filters): array
     {
-        $q = Pointage::query()
-            ->with(['agence', 'user.profil'])
-            ->whereBetween('clocked_at', [$from, $to]);
-        $this->applyCommonFilters($q, $filters);
-
-        $grouped = $q->get()->groupBy(fn (Pointage $p) => $p->agence?->nom
-            ?: ($p->user?->profil?->site ?: 'Sans agence'));
-
-        $rows = [];
-        foreach ($grouped as $agence => $items) {
-            /** @var Collection<int, Pointage> $items */
-            $tot = $this->heures->minutesFromCollection($items);
-            $rows[] = [
-                (string) $agence,
-                (string) $items->pluck('user_id')->unique()->count(),
-                (string) $items->where('type', 'arrivee')->count(),
-                (string) $items->where('type', 'depart')->count(),
-                (string) $items->where('type', 'arrivee')->where('statut', 'retard')->count(),
-                $this->heures->formatMinutes($tot['effective']),
-            ];
-        }
-        usort($rows, fn ($a, $b) => strcmp($a[0], $b[0]));
-
-        return [
-            'title' => 'Rapport par agence — '.FrenchDateFormat::date($from).' → '.FrenchDateFormat::date($to),
-            'headers' => ['Agence', 'Collaborateurs', 'Arrivées', 'Départs', 'Retards', 'Total H.effective'],
-            'rows' => $rows,
-        ];
+        return $this->rapportAgregationParGroupe(
+            $from,
+            $to,
+            $filters,
+            'agence',
+            'Agence',
+            'Rapport par agence — '.FrenchDateFormat::date($from).' → '.FrenchDateFormat::date($to),
+        );
     }
 
     /**
+     * Template : Direction | Effectif | Présences | Absences | Congés | Missions | Retards | Taux présence
+     *
      * @param  array<string, mixed>  $filters
      * @return array{title: string, headers: list<string>, rows: list<list<string>>}
      */
     private function rapportParDepartement(Carbon $from, Carbon $to, array $filters): array
     {
-        $q = Pointage::query()
-            ->with(['user.profil', 'agence'])
-            ->whereBetween('clocked_at', [$from, $to]);
-        $this->applyCommonFilters($q, $filters);
+        return $this->rapportAgregationParGroupe(
+            $from,
+            $to,
+            $filters,
+            'direction',
+            'Direction',
+            'Rapport par département — '.FrenchDateFormat::date($from).' → '.FrenchDateFormat::date($to),
+        );
+    }
 
-        $grouped = $q->get()->groupBy(fn (Pointage $p) => $p->user?->profil?->departement ?: 'Sans département');
+    /**
+     * @param  'agence'|'direction'  $mode
+     * @param  array<string, mixed>  $filters
+     * @return array{title: string, headers: list<string>, rows: list<list<string>>}
+     */
+    private function rapportAgregationParGroupe(
+        Carbon $from,
+        Carbon $to,
+        array $filters,
+        string $mode,
+        string $firstHeader,
+        string $title,
+    ): array {
+        $userIds = $this->filteredUserIds($filters);
+        $users = User::query()
+            ->with('profil')
+            ->whereIn('id', $userIds ?: [0])
+            ->orderBy('name')
+            ->get();
 
+        $joursOuvres = $this->joursOuvresDansPeriode($from, $to);
+        $joursOuvresSet = array_fill_keys($joursOuvres, true);
+
+        $pointagesByUser = Pointage::query()
+            ->whereIn('user_id', $userIds ?: [0])
+            ->whereBetween('clocked_at', [$from, $to])
+            ->orderBy('clocked_at')
+            ->get()
+            ->groupBy('user_id');
+
+        $declsByUser = $this->declarationsValidesParUser($userIds, $from, $to);
+
+        /** @var array<string, array{effectif:int,presences:int,absences:int,conges:int,missions:int,retards:int}> $stats */
+        $stats = [];
+
+        foreach ($users as $user) {
+            $profil = $user->profil;
+            $groupe = $mode === 'agence'
+                ? (string) ($profil?->site ?: 'Sans agence')
+                : (string) ($profil?->departement ?: 'Sans direction');
+
+            if (! isset($stats[$groupe])) {
+                $stats[$groupe] = [
+                    'effectif' => 0,
+                    'presences' => 0,
+                    'absences' => 0,
+                    'conges' => 0,
+                    'missions' => 0,
+                    'retards' => 0,
+                ];
+            }
+            $stats[$groupe]['effectif']++;
+
+            /** @var Collection<int, Pointage> $events */
+            $events = $pointagesByUser->get($user->id) ?? collect();
+            $byDay = $events->groupBy(fn (Pointage $p) => $p->clocked_at->format('Y-m-d'));
+            $coverage = $this->declarationCoverageByDay(
+                $declsByUser->get($user->id) ?? collect(),
+                $joursOuvresSet,
+            );
+
+            foreach ($joursOuvres as $day) {
+                /** @var Collection<int, Pointage> $items */
+                $items = $byDay->get($day) ?? collect();
+                $arrivee = $items->firstWhere('type', 'arrivee');
+                $depart = $items
+                    ->filter(fn (Pointage $p) => $p->type === 'depart')
+                    ->sortByDesc(fn (Pointage $p) => $p->clocked_at->timestamp)
+                    ->first();
+
+                if ($arrivee !== null || $depart !== null) {
+                    $stats[$groupe]['presences']++;
+                    if ($arrivee !== null && $arrivee->statut === 'retard') {
+                        $stats[$groupe]['retards']++;
+                    }
+
+                    continue;
+                }
+
+                $kind = $coverage[$day] ?? null;
+                if ($kind === 'mission') {
+                    $stats[$groupe]['missions']++;
+                } elseif ($kind === 'conge') {
+                    $stats[$groupe]['conges']++;
+                } else {
+                    // null = non justifié ; 'absence' = déclaration d’absence validée
+                    $stats[$groupe]['absences']++;
+                }
+            }
+        }
+
+        $joursCount = max(1, count($joursOuvres));
         $rows = [];
-        foreach ($grouped as $dept => $items) {
-            /** @var Collection<int, Pointage> $items */
-            $tot = $this->heures->minutesFromCollection($items);
+        foreach ($stats as $label => $s) {
+            $attendu = $s['effectif'] * $joursCount;
+            $taux = $attendu > 0
+                ? (int) round(100 * $s['presences'] / $attendu)
+                : 0;
             $rows[] = [
-                (string) $dept,
-                (string) $items->pluck('user_id')->unique()->count(),
-                (string) $items->where('type', 'arrivee')->count(),
-                (string) $items->where('type', 'depart')->count(),
-                (string) $items->where('type', 'arrivee')->where('statut', 'retard')->count(),
-                $this->heures->formatMinutes($tot['effective']),
+                $label,
+                (string) $s['effectif'],
+                (string) $s['presences'],
+                (string) $s['absences'],
+                (string) $s['conges'],
+                (string) $s['missions'],
+                (string) $s['retards'],
+                $taux.' %',
             ];
         }
-        usort($rows, fn ($a, $b) => strcmp($a[0], $b[0]));
+        usort($rows, fn (array $a, array $b) => strcasecmp($a[0], $b[0]));
 
         return [
-            'title' => 'Rapport par département — '.FrenchDateFormat::date($from).' → '.FrenchDateFormat::date($to),
-            'headers' => ['Département', 'Collaborateurs', 'Arrivées', 'Départs', 'Retards', 'Total H.effective'],
+            'title' => $title,
+            'headers' => [
+                $firstHeader, 'Effectif', 'Présences', 'Absences',
+                'Congés', 'Missions', 'Retards', 'Taux présence',
+            ],
             'rows' => $rows,
         ];
+    }
+
+    /**
+     * @param  list<int>  $userIds
+     * @return Collection<int, Collection<int, PointageDeclaration>>
+     */
+    private function declarationsValidesParUser(array $userIds, Carbon $from, Carbon $to): Collection
+    {
+        $fromDay = $from->toDateString();
+        $toDay = $to->toDateString();
+        $hasDateFin = Schema::hasColumn('pointage_declarations', 'date_fin');
+
+        $q = PointageDeclaration::query()
+            ->whereIn('user_id', $userIds ?: [0])
+            ->where('statut', 'valide')
+            ->whereIn('type', PointageDeclarationTypes::TYPES_JUSTIFICATIFS_PRESENCE)
+            ->whereDate('date_concernee', '<=', $toDay);
+
+        if ($hasDateFin) {
+            $q->where(function ($w) use ($fromDay): void {
+                $w->where(function ($x) use ($fromDay): void {
+                    $x->whereNotNull('date_fin')->whereDate('date_fin', '>=', $fromDay);
+                })->orWhere(function ($x) use ($fromDay): void {
+                    $x->whereNull('date_fin')->whereDate('date_concernee', '>=', $fromDay);
+                });
+            });
+        } else {
+            $q->whereDate('date_concernee', '>=', $fromDay);
+        }
+
+        return $q->orderByDesc('id')->get()->groupBy('user_id');
+    }
+
+    /**
+     * Couverture jour → mission | conge | absence (justifié).
+     *
+     * @param  Collection<int, PointageDeclaration>  $decls
+     * @param  array<string, bool>  $joursOuvresSet
+     * @return array<string, 'mission'|'conge'|'absence'>
+     */
+    private function declarationCoverageByDay(Collection $decls, array $joursOuvresSet): array
+    {
+        $out = [];
+        foreach ($decls as $d) {
+            $start = $d->date_concernee?->toDateString();
+            if ($start === null) {
+                continue;
+            }
+            $end = $d->date_fin?->toDateString() ?? $start;
+            $type = PointageDeclarationTypes::normalize((string) $d->type);
+            $kind = match ($type) {
+                'mission' => 'mission',
+                'conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'formation', 'regularisation' => 'conge',
+                default => 'absence',
+            };
+
+            $cursor = Carbon::parse($start)->startOfDay();
+            $endC = Carbon::parse($end)->startOfDay();
+            while ($cursor->lte($endC)) {
+                $key = $cursor->toDateString();
+                if (isset($joursOuvresSet[$key]) && ! isset($out[$key])) {
+                    $out[$key] = $kind;
+                }
+                $cursor->addDay();
+            }
+        }
+
+        return $out;
     }
 
     /**

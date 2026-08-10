@@ -130,7 +130,7 @@ class PointageDeclarationController extends Controller
         [$year, $month] = array_map('intval', explode('-', $mois, 2));
 
         $query = PointageDeclaration::query()
-            ->with(['user:id,name,email', 'managerUser:id,name', 'rhUser:id,name'])
+            ->with(['user:id,name,email', 'user.profil:id,email,fonction', 'managerUser:id,name', 'rhUser:id,name'])
             ->where(function ($q) use ($year, $month): void {
                 $q->where(function ($w) use ($year, $month): void {
                     $w->whereYear('date_concernee', $year)->whereMonth('date_concernee', $month);
@@ -144,13 +144,24 @@ class PointageDeclarationController extends Controller
                 }
             });
 
+        $onglet = $request->input('onglet', 'attente');
+        if (! is_string($onglet) || ! in_array($onglet, ['attente', 'historique', 'toutes'], true)) {
+            $onglet = 'attente';
+        }
+
+        if ($onglet === 'attente') {
+            $query->whereIn('statut', ['en_attente_manager', 'en_attente_rh']);
+        } elseif ($onglet === 'historique') {
+            $query->whereIn('statut', ['valide', 'rejete']);
+        }
+
         $type = $request->input('type');
         if (is_string($type) && $type !== '' && $type !== 'tous') {
             $query->where('type', $type);
         }
 
         $statut = $request->input('statut');
-        if (is_string($statut) && $statut !== '' && $statut !== 'tous') {
+        if ($onglet === 'toutes' && is_string($statut) && $statut !== '' && $statut !== 'tous') {
             $query->where('statut', $statut);
         }
 
@@ -167,15 +178,34 @@ class PointageDeclarationController extends Controller
             $declarations->getCollection()->map(fn (PointageDeclaration $d) => $this->serializeDeclarationRow($d))
         );
 
+        $countBase = function () use ($year, $month) {
+            return PointageDeclaration::query()
+                ->where(function ($q) use ($year, $month): void {
+                    $q->where(function ($w) use ($year, $month): void {
+                        $w->whereYear('date_concernee', $year)->whereMonth('date_concernee', $month);
+                    });
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('pointage_declarations', 'date_fin')) {
+                        $q->orWhere(function ($w) use ($year, $month): void {
+                            $w->whereNotNull('date_fin')
+                                ->whereYear('date_fin', $year)
+                                ->whereMonth('date_fin', $month);
+                        });
+                    }
+                });
+        };
+
         $counts = [
-            'en_attente_manager' => PointageDeclaration::query()->where('statut', 'en_attente_manager')->count(),
-            'en_attente_rh' => PointageDeclaration::query()->where('statut', 'en_attente_rh')->count(),
-            'valide' => PointageDeclaration::query()->where('statut', 'valide')->count(),
-            'rejete' => PointageDeclaration::query()->where('statut', 'rejete')->count(),
+            'en_attente_manager' => $countBase()->where('statut', 'en_attente_manager')->count(),
+            'en_attente_rh' => $countBase()->where('statut', 'en_attente_rh')->count(),
+            'valide' => $countBase()->where('statut', 'valide')->count(),
+            'rejete' => $countBase()->where('statut', 'rejete')->count(),
         ];
+        // Badge onglet « En attente de Validation »
+        $counts['en_attente'] = (int) $counts['en_attente_manager'] + (int) $counts['en_attente_rh'];
+
 
         $historique = PointageDeclaration::query()
-            ->with(['user:id,name,email', 'managerUser:id,name', 'rhUser:id,name'])
+            ->with(['user:id,name,email', 'user.profil:id,email,fonction', 'managerUser:id,name', 'rhUser:id,name'])
             ->whereIn('statut', ['valide', 'rejete'])
             ->orderByDesc('updated_at')
             ->limit(80)
@@ -192,6 +222,7 @@ class PointageDeclarationController extends Controller
                 'type' => is_string($type) && $type !== '' ? $type : 'tous',
                 'statut' => is_string($statut) && $statut !== '' ? $statut : 'tous',
                 'q' => is_string($q) ? $q : '',
+                'onglet' => $onglet,
             ],
             'types' => PointageDeclarationTypes::optionsForApi(),
             'counts' => $counts,
@@ -424,6 +455,12 @@ class PointageDeclarationController extends Controller
         $fileLabel = $path ? basename((string) $path) : null;
         $dateFin = $d->date_fin?->format('Y-m-d');
         $dateFinDisplay = $d->date_fin?->format('d/m/Y');
+        $start = $d->date_concernee?->copy()->startOfDay();
+        $end = ($d->date_fin ?? $d->date_concernee)?->copy()->startOfDay();
+            $nbJours = ($start && $end) ? (int) max(1, $start->diffInDays($end) + 1) : 1;
+        $dateReprise = $end?->copy()->addDay();
+
+        $d->loadMissing('user.profil');
 
         return [
             'id' => $d->id,
@@ -431,8 +468,12 @@ class PointageDeclarationController extends Controller
             'type_label' => PointageDeclarationTypes::label((string) $d->type),
             'date_concernee' => $d->date_concernee?->format('Y-m-d'),
             'date_concernee_display' => $d->date_concernee?->format('d/m/Y'),
+            'date_concernee_short' => $d->date_concernee?->format('d M, y'),
             'date_fin' => $dateFin,
             'date_fin_display' => $dateFinDisplay,
+            'date_fin_short' => $d->date_fin?->format('d M, y') ?? $d->date_concernee?->format('d M, y'),
+            'nb_jours' => $nbJours,
+            'date_reprise_display' => $dateReprise?->format('d/m/Y'),
             'heure_debut' => $d->heure_debut,
             'heure_fin' => $d->heure_fin,
             'lieu' => $d->lieu,
@@ -447,6 +488,7 @@ class PointageDeclarationController extends Controller
                 'id' => $d->user?->id,
                 'name' => $d->user?->name,
                 'email' => $d->user?->email,
+                'fonction' => $d->user?->profil?->fonction,
             ] : null,
             'manager_user' => $d->relationLoaded('managerUser') ? [
                 'name' => $d->managerUser?->name,

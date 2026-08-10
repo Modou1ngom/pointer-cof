@@ -26,6 +26,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             RoleSeeder::class,
             PointageDemoSeeder::class,
+            PointageDeclarationDemoSeeder::class,
         ]);
     }
 }

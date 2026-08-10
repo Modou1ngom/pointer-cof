@@ -2,7 +2,7 @@
 import PointageLayout from '@/layouts/pointage/PointageLayout.vue';
 import type { BreadcrumbItem } from '@/types';
 import { Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { ChevronLeft, ChevronRight, Eye, History, Pencil, Trash2 } from 'lucide-vue-next';
+import { Check, ChevronLeft, ChevronRight, CircleAlert, Eye, Pencil, Timer, Trash2, X } from 'lucide-vue-next';
 import { computed, reactive, ref, watch } from 'vue';
 
 interface ProcessStep {
@@ -18,8 +18,12 @@ interface Decl {
     type_label: string;
     date_concernee: string;
     date_concernee_display: string;
+    date_concernee_short?: string | null;
     date_fin?: string | null;
     date_fin_display?: string | null;
+    date_fin_short?: string | null;
+    nb_jours?: number;
+    date_reprise_display?: string | null;
     heure_debut?: string | null;
     heure_fin?: string | null;
     lieu?: string | null;
@@ -29,7 +33,7 @@ interface Decl {
     statut_label: string;
     has_justificatif?: boolean;
     justificatif_filename?: string | null;
-    user?: { id?: number; name: string; email: string } | null;
+    user?: { id?: number; name: string; email: string; fonction?: string | null } | null;
     manager_user?: { name: string } | null;
     rh_user?: { name: string } | null;
     manager_comment?: string | null;
@@ -39,6 +43,8 @@ interface Decl {
     created_at_display?: string | null;
     processus: ProcessStep[];
 }
+
+type Onglet = 'attente' | 'historique' | 'toutes';
 
 const props = defineProps<{
     declarations: {
@@ -50,12 +56,18 @@ const props = defineProps<{
     historique: Decl[];
     periode_mois: string;
     periode_label: string;
-    filters: { type: string; statut: string; q: string };
+    filters: { type: string; statut: string; q: string; onglet?: string };
     types: { value: string; label: string }[];
     counts: Record<string, number>;
     can_manage: boolean;
     can_validate_rh: boolean;
 }>();
+
+const page = usePage();
+const flashSuccess = computed(() => {
+    const flash = page.props.flash as { success?: string } | undefined;
+    return flash?.success ?? null;
+});
 
 const typesFiltres = computed(() =>
     (props.types || []).filter((t) => !['regularisation', 'conge', 'retard'].includes(t.value)),
@@ -70,6 +82,7 @@ const localFilters = reactive({
     type: props.filters.type || 'tous',
     statut: props.filters.statut || 'tous',
     q: props.filters.q || '',
+    onglet: (props.filters.onglet as Onglet) || 'attente',
 });
 
 watch(
@@ -78,13 +91,23 @@ watch(
         localFilters.type = f.type || 'tous';
         localFilters.statut = f.statut || 'tous';
         localFilters.q = f.q || '';
+        localFilters.onglet = (f.onglet as Onglet) || 'attente';
     },
     { deep: true },
 );
 
+const pendingCount = computed(() => {
+    const c = props.counts || {};
+    if (typeof c.en_attente === 'number') {
+        return c.en_attente;
+    }
+    return (c.en_attente_manager ?? 0) + (c.en_attente_rh ?? 0);
+});
+
 function listUrl(overrides: Record<string, string> = {}): string {
     const merged: Record<string, string> = {
         mois: props.periode_mois,
+        onglet: localFilters.onglet,
         type: localFilters.type,
         statut: localFilters.statut,
         q: localFilters.q,
@@ -103,6 +126,30 @@ function listUrl(overrides: Record<string, string> = {}): string {
 
 function applyFilters() {
     router.get(listUrl(), {}, { preserveState: true, preserveScroll: true });
+}
+
+function setOnglet(onglet: Onglet) {
+    localFilters.onglet = onglet;
+    if (onglet !== 'toutes') {
+        localFilters.statut = 'tous';
+    }
+    applyFilters();
+}
+
+/** Filtre par type via les en-têtes de colonnes (re-clic = tous). */
+function setTypeFilter(type: string) {
+    localFilters.type = localFilters.type === type ? 'tous' : type;
+    applyFilters();
+}
+
+function typeHeaderClass(type: string): string {
+    const active = localFilters.type === type;
+    return [
+        'px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wide transition',
+        active
+            ? 'bg-[#F3E8FF] text-[#5B2C8F] underline decoration-2 underline-offset-4'
+            : 'text-[#888780] hover:bg-[#F8F5FC] hover:text-[#5B2C8F]',
+    ].join(' ');
 }
 
 function shiftMonth(ym: string, delta: number): string {
@@ -134,16 +181,13 @@ function periode(d: Decl): string {
     return s;
 }
 
-function statutBadgeClass(statut: string): string {
-    if (statut === 'valide') return 'bg-[#EAF3DE] text-[#3B6D11]';
-    if (statut === 'rejete') return 'bg-[#FCEBEB] text-[#A32D2D]';
-    if (statut === 'en_attente_rh') return 'bg-[#E6F1FB] text-[#185FA5]';
-    return 'bg-[#FFF4E6] text-[#C2410C]';
+function joursLabel(n: number | undefined): string {
+    const v = n ?? 1;
+    return `${v} jour${v > 1 ? 's' : ''}`;
 }
 
 const viewDecl = ref<Decl | null>(null);
 const editDecl = ref<Decl | null>(null);
-const showHistorique = ref(false);
 
 const editForm = useForm({
     type: 'permission_exceptionnelle',
@@ -205,14 +249,64 @@ function destroyDecl(d: Decl) {
     router.delete(`/pointage/declarations/${d.id}`, { preserveScroll: true });
 }
 
+const confirmDecision = ref<{ decl: Decl; accept: boolean } | null>(null);
+const showSuccessModal = ref(false);
+const deciding = ref(false);
+
+function askDecideRh(d: Decl, accept: boolean) {
+    confirmDecision.value = { decl: d, accept };
+}
+
 function decideRh(id: number, accept: boolean) {
-    router.post(`/pointage/declarations/${id}/decision-rh`, { accept, comment: '' }, { preserveScroll: true });
+    deciding.value = true;
+    router.post(
+        `/pointage/declarations/${id}/decision-rh`,
+        { accept, comment: '' },
+        {
+            preserveScroll: true,
+            onSuccess: () => {
+                confirmDecision.value = null;
+                showSuccessModal.value = true;
+            },
+            onFinish: () => {
+                deciding.value = false;
+            },
+        },
+    );
+}
+
+function confirmDecide() {
+    if (!confirmDecision.value) return;
+    decideRh(confirmDecision.value.decl.id, confirmDecision.value.accept);
 }
 
 function onEditFile(e: Event) {
     const t = e.target as HTMLInputElement;
     editForm.justificatif = t.files?.[0] ?? null;
 }
+
+function canDecide(d: Decl): boolean {
+    return props.can_validate_rh && d.statut === 'en_attente_rh';
+}
+
+function isTermine(d: Decl): boolean {
+    return d.statut === 'valide' || d.statut === 'rejete';
+}
+
+function n1Done(d: Decl): boolean {
+    return Boolean(d.manager_decided_at) || ['en_attente_rh', 'valide', 'rejete'].includes(d.statut);
+}
+
+function rhDone(d: Decl): boolean {
+    return Boolean(d.rh_decided_at) || d.statut === 'valide' || d.statut === 'rejete';
+}
+
+function dateEnregistrement(d: Decl): string {
+    const raw = d.created_at_display || '';
+    return raw.includes(' ') ? raw.split(' ')[0] : raw || '—';
+}
+
+const isToutes = computed(() => localFilters.onglet === 'toutes');
 </script>
 
 <template>
@@ -220,17 +314,7 @@ function onEditFile(e: Event) {
         <div class="mx-auto max-w-7xl space-y-5">
             <div class="flex flex-wrap items-end justify-between gap-3">
                 <div>
-                    <div class="flex flex-wrap items-center gap-3">
-                        <h1 class="text-xl font-semibold text-[#0C447C]">Demande</h1>
-                        <button
-                            type="button"
-                            class="inline-flex items-center gap-1.5 rounded-md border border-[#e2e0d8] bg-white px-3 py-1.5 text-sm font-medium text-[#0C447C] hover:bg-[#FAFAF8]"
-                            @click="showHistorique = true"
-                        >
-                            <History class="h-4 w-4" />
-                            Historique
-                        </button>
-                    </div>
+                    <h1 class="text-xl font-semibold text-[#0C447C]">Demande</h1>
                     <p class="mt-1 text-sm text-[#888780]">
                         Suivi et validation RH des déclarations (mission, absence, permission, congé, formation…).
                     </p>
@@ -248,128 +332,316 @@ function onEditFile(e: Event) {
 
             <p v-if="flashSuccess" class="rounded-md bg-[#EAF3DE] px-3 py-2 text-sm text-[#3B6D11]">{{ flashSuccess }}</p>
 
-            <div class="grid gap-3 sm:grid-cols-4">
-                <div class="rounded-[10px] border border-[#e2e0d8] bg-white px-4 py-3">
-                    <div class="text-[10px] font-bold uppercase text-[#888780]">En attente de validation N+1</div>
-                    <div class="text-lg font-semibold text-[#C2410C]">{{ counts.en_attente_manager ?? 0 }}</div>
+            <!-- Onglets style image 1 -->
+            <div class="rounded-[12px] border border-[#e2e0d8] bg-white shadow-sm">
+                <div class="flex flex-wrap items-center gap-6 border-b border-[#F1EFE8] px-5 pt-3">
+                    <button
+                        type="button"
+                        class="relative pb-3 text-sm font-semibold transition"
+                        :class="localFilters.onglet === 'attente' ? 'text-[#5B2C8F]' : 'text-[#888780] hover:text-[#0C447C]'"
+                        @click="setOnglet('attente')"
+                    >
+                        En attente de Validation
+                        <span
+                            class="ml-2 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-[#E11D48] px-1.5 text-[11px] font-bold leading-none text-white"
+                        >
+                            {{ pendingCount }}
+                        </span>
+                        <span
+                            v-if="localFilters.onglet === 'attente'"
+                            class="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-[#5B2C8F]"
+                        />
+                    </button>
+                    <button
+                        type="button"
+                        class="relative pb-3 text-sm font-semibold transition"
+                        :class="localFilters.onglet === 'historique' ? 'text-[#5B2C8F]' : 'text-[#888780] hover:text-[#0C447C]'"
+                        @click="setOnglet('historique')"
+                    >
+                        Historique
+                        <span
+                            v-if="localFilters.onglet === 'historique'"
+                            class="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-[#5B2C8F]"
+                        />
+                    </button>
+                    <button
+                        type="button"
+                        class="relative pb-3 text-sm font-semibold transition"
+                        :class="localFilters.onglet === 'toutes' ? 'text-[#5B2C8F]' : 'text-[#888780] hover:text-[#0C447C]'"
+                        @click="setOnglet('toutes')"
+                    >
+                        Toutes les demandes
+                        <span
+                            v-if="localFilters.onglet === 'toutes'"
+                            class="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-[#5B2C8F]"
+                        />
+                    </button>
                 </div>
-                <div class="rounded-[10px] border border-[#e2e0d8] bg-white px-4 py-3">
-                    <div class="text-[10px] font-bold uppercase text-[#888780]">En attente de validation RH</div>
-                    <div class="text-lg font-semibold text-[#185FA5]">{{ counts.en_attente_rh ?? 0 }}</div>
-                </div>
-                <div class="rounded-[10px] border border-[#e2e0d8] bg-white px-4 py-3">
-                    <div class="text-[10px] font-bold uppercase text-[#888780]">Validées</div>
-                    <div class="text-lg font-semibold text-[#3B6D11]">{{ counts.valide ?? 0 }}</div>
-                </div>
-                <div class="rounded-[10px] border border-[#e2e0d8] bg-white px-4 py-3">
-                    <div class="text-[10px] font-bold uppercase text-[#888780]">Rejetées</div>
-                    <div class="text-lg font-semibold text-[#A32D2D]">{{ counts.rejete ?? 0 }}</div>
-                </div>
-            </div>
 
-            <form class="flex flex-wrap items-end gap-3 rounded-[10px] border border-[#e2e0d8] bg-white p-4" @submit.prevent="applyFilters">
-                <div class="min-w-[10rem] flex-1">
-                    <label class="text-[11px] font-bold uppercase text-[#888780]">Recherche</label>
-                    <input v-model="localFilters.q" type="search" placeholder="Employé, email…" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
-                </div>
-                <div>
-                    <label class="text-[11px] font-bold uppercase text-[#888780]">Type</label>
-                    <select v-model="localFilters.type" class="mt-1 rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
-                        <option value="tous">Tous</option>
-                        <option v-for="t in typesFiltres" :key="t.value" :value="t.value">{{ t.label }}</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="text-[11px] font-bold uppercase text-[#888780]">Statut</label>
-                    <select v-model="localFilters.statut" class="mt-1 rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
-                        <option value="tous">Tous</option>
-                        <option value="en_attente_manager">En attente N+1</option>
-                        <option value="en_attente_rh">En attente RH</option>
-                        <option value="valide">Validé</option>
-                        <option value="rejete">Rejeté</option>
-                    </select>
-                </div>
-                <button type="submit" class="rounded-md bg-[#185FA5] px-4 py-2 text-sm font-medium text-white">Filtrer</button>
-            </form>
+                <form class="flex flex-wrap items-end gap-3 border-b border-[#F1EFE8] px-5 py-4" @submit.prevent="applyFilters">
+                    <div class="min-w-[10rem] flex-1">
+                        <label class="text-[11px] font-bold uppercase text-[#888780]">Recherche</label>
+                        <input v-model="localFilters.q" type="search" placeholder="Employé, email…" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
+                    </div>
+                    <div>
+                        <label class="text-[11px] font-bold uppercase text-[#888780]">Type</label>
+                        <select v-model="localFilters.type" class="mt-1 rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
+                            <option value="tous">Tous</option>
+                            <option v-for="t in typesFiltres" :key="t.value" :value="t.value">{{ t.label }}</option>
+                        </select>
+                    </div>
+                    <div v-if="localFilters.onglet === 'toutes'">
+                        <label class="text-[11px] font-bold uppercase text-[#888780]">Statut</label>
+                        <select v-model="localFilters.statut" class="mt-1 rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
+                            <option value="tous">Tous</option>
+                            <option value="en_attente_manager">En attente N+1</option>
+                            <option value="en_attente_rh">En attente RH</option>
+                            <option value="valide">Validé</option>
+                            <option value="rejete">Rejeté</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="rounded-md bg-[#185FA5] px-4 py-2 text-sm font-medium text-white">Filtrer</button>
+                </form>
 
-            <div class="overflow-hidden rounded-[10px] border border-[#e2e0d8] bg-white">
                 <div class="overflow-x-auto">
-                    <table class="w-full min-w-[980px] text-sm">
-                        <thead class="bg-[#FAFAF8] text-left text-[10px] font-bold uppercase text-[#888780]">
+                    <!-- Layout image 3 : Toutes les demandes -->
+                    <table v-if="isToutes" class="w-full min-w-[1100px] text-sm">
+                        <thead class="bg-[#FAFAF8] text-left text-[11px] font-bold uppercase tracking-wide text-[#888780]">
                             <tr>
-                                <th class="px-4 py-3">Employé</th>
+                                <th class="px-5 py-3">Agent</th>
                                 <th class="px-4 py-3">Type</th>
-                                <th class="px-4 py-3">Période</th>
-                                <th class="px-4 py-3">Processus</th>
-                                <th class="px-4 py-3">Statut</th>
-                                <th class="px-4 py-3">Actions</th>
+                                <th class="px-4 py-3">Début</th>
+                                <th class="px-4 py-3">Fin</th>
+                                <th class="px-4 py-3">Circuit validation</th>
+                                <th class="px-4 py-3">État</th>
+                                <th class="px-4 py-3">Date enregistrement</th>
+                                <th class="px-5 py-3 text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="d in declarations.data" :key="d.id" class="border-t border-[#F1EFE8]">
-                                <td class="px-4 py-3">
-                                    <div class="font-medium text-[#0C447C]">{{ d.user?.name }}</div>
-                                    <div class="text-xs text-[#888780]">{{ d.user?.email }}</div>
-                                    <div class="text-xs text-[#888780]">{{ d.created_at_display }}</div>
-                                </td>
-                                <td class="px-4 py-3">
-                                    <div>{{ d.type_label }}</div>
-                                    <div class="line-clamp-1 text-xs text-[#888780]" :title="d.motif">{{ d.motif }}</div>
-                                </td>
-                                <td class="whitespace-nowrap px-4 py-3">{{ periode(d) }}</td>
-                                <td class="px-4 py-3">
-                                    <div class="flex flex-wrap gap-1">
-                                        <span
-                                            v-for="step in d.processus"
-                                            :key="step.key"
-                                            class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                                            :class="
-                                                step.current
-                                                    ? 'bg-[#185FA5] text-white'
-                                                    : step.done
-                                                      ? 'bg-[#EAF3DE] text-[#3B6D11]'
-                                                      : 'bg-[#F1EFE8] text-[#888780]'
-                                            "
-                                        >
-                                            {{ step.label }}
-                                        </span>
+                            <tr
+                                v-for="d in declarations.data"
+                                :key="'t-' + d.id"
+                                class="border-t border-dashed border-[#E5E7EB] transition hover:bg-[#FCFBFA]"
+                            >
+                                <td class="px-5 py-4">
+                                    <div class="font-semibold capitalize text-[#1a1a1a]">{{ d.user?.name }}</div>
+                                    <div class="text-xs uppercase tracking-wide text-[#888780]">
+                                        {{ d.user?.fonction || d.user?.email || '—' }}
                                     </div>
                                 </td>
-                                <td class="px-4 py-3">
-                                    <span class="inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold" :class="statutBadgeClass(d.statut)">
-                                        {{ d.statut_label }}
+                                <td class="px-4 py-4">
+                                    <div class="font-medium text-[#1a1a1a]">{{ d.type_label }}</div>
+                                    <div class="text-xs font-semibold text-[#E11D48]">{{ joursLabel(d.nb_jours) }}</div>
+                                </td>
+                                <td class="px-4 py-4 whitespace-nowrap text-[#374151]">{{ d.date_concernee_display }}</td>
+                                <td class="px-4 py-4 whitespace-nowrap text-[#374151]">{{ d.date_fin_display || d.date_concernee_display }}</td>
+                                <td class="px-4 py-4">
+                                    <div class="flex items-center gap-3">
+                                        <div class="flex flex-col items-center gap-1">
+                                            <span
+                                                class="inline-flex h-8 w-8 items-center justify-center rounded-full"
+                                                :class="n1Done(d) ? 'bg-[#10B981] text-white' : 'bg-[#E5E7EB] text-[#4B5563]'"
+                                                :title="n1Done(d) ? 'N+1 validé' : 'N+1 en attente'"
+                                            >
+                                                <Check v-if="n1Done(d)" class="h-4 w-4" />
+                                                <Timer v-else class="h-4 w-4" />
+                                            </span>
+                                            <span class="text-[10px] font-semibold text-[#6B7280]">N+1</span>
+                                        </div>
+                                        <div class="flex flex-col items-center gap-1">
+                                            <span
+                                                class="inline-flex h-8 w-8 items-center justify-center rounded-full"
+                                                :class="rhDone(d) ? 'bg-[#10B981] text-white' : 'bg-[#E5E7EB] text-[#4B5563]'"
+                                                :title="rhDone(d) ? 'RH validé' : 'RH en attente'"
+                                            >
+                                                <Check v-if="rhDone(d)" class="h-4 w-4" />
+                                                <Timer v-else class="h-4 w-4" />
+                                            </span>
+                                            <span class="text-[10px] font-semibold text-[#6B7280]">RH</span>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="px-4 py-4">
+                                    <span
+                                        class="text-sm font-semibold"
+                                        :class="isTermine(d) ? 'text-[#E11D48]' : 'text-[#6B7280]'"
+                                    >
+                                        {{ isTermine(d) ? 'Terminé' : 'En attente' }}
                                     </span>
                                 </td>
-                                <td class="px-4 py-3">
-                                    <div class="flex flex-wrap gap-1">
-                                        <button type="button" class="inline-flex items-center gap-1 rounded border border-[#e2e0d8] px-2 py-1 text-xs hover:bg-[#FAFAF8]" @click="openView(d)">
-                                            <Eye class="h-3.5 w-3.5" /> Voir
+                                <td class="px-4 py-4 whitespace-nowrap text-[#374151]">{{ dateEnregistrement(d) }}</td>
+                                <td class="px-5 py-4">
+                                    <div class="flex items-center justify-end gap-2">
+                                        <button
+                                            type="button"
+                                            class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#F3F4F6] text-[#4B5563] hover:bg-[#E5E7EB]"
+                                            title="Voir"
+                                            @click="openView(d)"
+                                        >
+                                            <Eye class="h-4 w-4" />
                                         </button>
-                                        <template v-if="can_validate_rh && d.statut === 'en_attente_rh'">
-                                            <button type="button" class="rounded bg-[#EAF3DE] px-2 py-1 text-xs text-[#3B6D11]" @click="decideRh(d.id, true)">
-                                                Valider
+                                        <template v-if="canDecide(d)">
+                                            <button
+                                                type="button"
+                                                class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#FFE4E6] text-[#E11D48] hover:bg-[#FECDD3]"
+                                                title="Rejeter"
+                                                @click="askDecideRh(d, false)"
+                                            >
+                                                <X class="h-4 w-4" />
                                             </button>
-                                            <button type="button" class="rounded bg-[#FCEBEB] px-2 py-1 text-xs text-[#A32D2D]" @click="decideRh(d.id, false)">
-                                                Rejeter
-                                            </button>
-                                        </template>
-                                        <template v-if="can_manage">
-                                            <button type="button" class="inline-flex items-center gap-1 rounded border border-[#e2e0d8] px-2 py-1 text-xs text-[#185FA5] hover:bg-[#E6F1FB]" @click="openEdit(d)">
-                                                <Pencil class="h-3.5 w-3.5" /> Modifier
-                                            </button>
-                                            <button type="button" class="inline-flex items-center gap-1 rounded border border-[#FCEBEB] px-2 py-1 text-xs text-[#A32D2D] hover:bg-[#FCEBEB]" @click="destroyDecl(d)">
-                                                <Trash2 class="h-3.5 w-3.5" /> Suppr.
+                                            <button
+                                                type="button"
+                                                class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#D1FAE5] text-[#059669] hover:bg-[#A7F3D0]"
+                                                title="Valider"
+                                                @click="askDecideRh(d, true)"
+                                            >
+                                                <Check class="h-4 w-4" />
                                             </button>
                                         </template>
                                     </div>
                                 </td>
                             </tr>
                             <tr v-if="!declarations.data?.length">
-                                <td colspan="6" class="px-4 py-10 text-center text-[#888780]">Aucune déclaration pour ces filtres.</td>
+                                <td colspan="8" class="px-5 py-12 text-center text-[#888780]">Aucune déclaration pour ces filtres.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <!-- Layout image 1 : En attente / Historique -->
+                    <table v-else class="w-full min-w-[1100px] text-sm">
+                        <thead class="bg-[#FAFAF8]">
+                            <tr>
+                                <th class="px-5 py-3">
+                                    <button type="button" class="w-full text-left" :class="typeHeaderClass('absence')" @click="setTypeFilter('absence')">
+                                        Absence
+                                    </button>
+                                </th>
+                                <th class="px-0 py-0">
+                                    <button type="button" class="w-full px-4 py-3 text-left" :class="typeHeaderClass('conge_annuel')" @click="setTypeFilter('conge_annuel')">
+                                        Congé annuel
+                                    </button>
+                                </th>
+                                <th class="px-0 py-0">
+                                    <button type="button" class="w-full px-4 py-3 text-left" :class="typeHeaderClass('conge_maladie')" @click="setTypeFilter('conge_maladie')">
+                                        Congé maladie
+                                    </button>
+                                </th>
+                                <th class="px-0 py-0">
+                                    <button type="button" class="w-full px-4 py-3 text-left" :class="typeHeaderClass('permission_exceptionnelle')" @click="setTypeFilter('permission_exceptionnelle')">
+                                        Permission exceptionnelle
+                                    </button>
+                                </th>
+                                <th class="px-0 py-0">
+                                    <button type="button" class="w-full px-4 py-3 text-left" :class="typeHeaderClass('mission')" @click="setTypeFilter('mission')">
+                                        Mission
+                                    </button>
+                                </th>
+                                <th class="px-0 py-0">
+                                    <button type="button" class="w-full px-4 py-3 text-left" :class="typeHeaderClass('formation')" @click="setTypeFilter('formation')">
+                                        Formation
+                                    </button>
+                                </th>
+                                <th class="px-5 py-3 text-right text-[11px] font-bold uppercase tracking-wide text-[#888780]">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr
+                                v-for="d in declarations.data"
+                                :key="d.id"
+                                class="border-t border-[#F1EFE8] transition hover:bg-[#FCFBFA]"
+                            >
+                                <td class="px-5 py-4">
+                                    <div class="font-semibold capitalize text-[#1a1a1a]">{{ d.user?.name }}</div>
+                                    <div class="text-xs uppercase tracking-wide text-[#888780]">
+                                        {{ d.user?.fonction || d.user?.email || '—' }}
+                                    </div>
+                                </td>
+                                <td class="px-4 py-4">
+                                    <span class="inline-flex h-8 min-w-[2rem] items-center justify-center rounded-full bg-[#FCE7F3] px-2.5 text-sm font-bold text-[#BE185D]">
+                                        {{ d.nb_jours ?? 1 }}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-4">
+                                    <div class="font-semibold text-[#1a1a1a]">{{ d.type_label }}</div>
+                                    <div class="text-xs text-[#888780]">{{ joursLabel(d.nb_jours) }}</div>
+                                </td>
+                                <td class="px-4 py-4">
+                                    <div class="flex items-center gap-2">
+                                        <span class="rounded-md bg-[#F3F4F6] px-2.5 py-1 text-xs font-medium text-[#4B5563]">
+                                            {{ d.date_concernee_short || d.date_concernee_display }}
+                                        </span>
+                                        <span class="text-[#9CA3AF]">→</span>
+                                        <span class="rounded-md bg-[#F3F4F6] px-2.5 py-1 text-xs font-medium text-[#4B5563]">
+                                            {{ d.date_fin_short || d.date_concernee_short || d.date_concernee_display }}
+                                        </span>
+                                    </div>
+                                    <div v-if="d.heure_debut || d.heure_fin" class="mt-1 text-[11px] text-[#888780]">
+                                        {{ [d.heure_debut, d.heure_fin].filter(Boolean).join(' – ') }}
+                                    </div>
+                                </td>
+                                <td class="px-4 py-4 text-[#6B7280]">
+                                    {{ d.lieu || d.manager_user?.name || '—' }}
+                                </td>
+                                <td class="px-4 py-4 font-semibold text-[#1a1a1a]">
+                                    {{ d.date_reprise_display || '—' }}
+                                </td>
+                                <td class="px-5 py-4">
+                                    <div class="flex items-center justify-end gap-2">
+                                        <button
+                                            type="button"
+                                            class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#EDE9FE] text-[#5B2C8F] hover:bg-[#DDD6FE]"
+                                            title="Voir"
+                                            @click="openView(d)"
+                                        >
+                                            <Eye class="h-4 w-4" />
+                                        </button>
+                                        <template v-if="canDecide(d)">
+                                            <button
+                                                type="button"
+                                                class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#FFE4E6] text-[#E11D48] hover:bg-[#FECDD3]"
+                                                title="Rejeter"
+                                                @click="askDecideRh(d, false)"
+                                            >
+                                                <X class="h-4 w-4" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#D1FAE5] text-[#059669] hover:bg-[#A7F3D0]"
+                                                title="Valider"
+                                                @click="askDecideRh(d, true)"
+                                            >
+                                                <Check class="h-4 w-4" />
+                                            </button>
+                                        </template>
+                                        <template v-if="can_manage">
+                                            <button
+                                                type="button"
+                                                class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#e2e0d8] text-[#185FA5] hover:bg-[#E6F1FB]"
+                                                title="Modifier"
+                                                @click="openEdit(d)"
+                                            >
+                                                <Pencil class="h-4 w-4" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#FCEBEB] text-[#A32D2D] hover:bg-[#FCEBEB]"
+                                                title="Supprimer"
+                                                @click="destroyDecl(d)"
+                                            >
+                                                <Trash2 class="h-4 w-4" />
+                                            </button>
+                                        </template>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr v-if="!declarations.data?.length">
+                                <td colspan="7" class="px-5 py-12 text-center text-[#888780]">Aucune déclaration pour ces filtres.</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
+
                 <div v-if="declarations.last_page > 1" class="flex flex-wrap justify-center gap-1 border-t border-[#e2e0d8] px-4 py-3">
                     <template v-for="(link, i) in declarations.links" :key="i">
                         <Link
@@ -377,68 +649,12 @@ function onEditFile(e: Event) {
                             :href="link.url"
                             preserve-scroll
                             class="min-w-[2.25rem] rounded-md px-2 py-1 text-center text-xs"
-                            :class="link.active ? 'bg-[#185FA5] font-semibold text-white' : 'border border-[#e2e0d8] text-[#0C447C]'"
+                            :class="link.active ? 'bg-[#5B2C8F] font-semibold text-white' : 'border border-[#e2e0d8] text-[#0C447C]'"
                         >
                             <span v-html="link.label" />
                         </Link>
                         <span v-else class="min-w-[2.25rem] px-2 py-1 text-center text-xs text-[#ccc]" v-html="link.label" />
                     </template>
-                </div>
-            </div>
-        </div>
-
-        <!-- Historique des validations -->
-        <div v-if="showHistorique" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="showHistorique = false">
-            <div class="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-[10px] bg-white shadow-xl">
-                <div class="flex items-center justify-between border-b border-[#e2e0d8] px-5 py-4">
-                    <h2 class="text-lg font-semibold text-[#0C447C]">Historique des validations</h2>
-                    <button type="button" class="rounded-md border border-[#e2e0d8] px-3 py-1.5 text-sm" @click="showHistorique = false">Fermer</button>
-                </div>
-                <div class="overflow-auto">
-                    <table class="w-full min-w-[720px] text-sm">
-                        <thead class="sticky top-0 bg-[#FAFAF8] text-left text-[10px] font-bold uppercase text-[#888780]">
-                            <tr>
-                                <th class="px-4 py-3">Employé</th>
-                                <th class="px-4 py-3">Type</th>
-                                <th class="px-4 py-3">Période</th>
-                                <th class="px-4 py-3">N+1</th>
-                                <th class="px-4 py-3">RH</th>
-                                <th class="px-4 py-3">Statut</th>
-                                <th class="px-4 py-3"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="d in historique" :key="'h-' + d.id" class="border-t border-[#F1EFE8]">
-                                <td class="px-4 py-3">
-                                    <div class="font-medium text-[#0C447C]">{{ d.user?.name }}</div>
-                                    <div class="text-xs text-[#888780]">{{ d.created_at_display }}</div>
-                                </td>
-                                <td class="px-4 py-3">{{ d.type_label }}</td>
-                                <td class="whitespace-nowrap px-4 py-3">{{ periode(d) }}</td>
-                                <td class="px-4 py-3">
-                                    <div>{{ d.manager_user?.name || '—' }}</div>
-                                    <div v-if="d.manager_decided_at" class="text-xs text-[#888780]">{{ d.manager_decided_at }}</div>
-                                </td>
-                                <td class="px-4 py-3">
-                                    <div>{{ d.rh_user?.name || '—' }}</div>
-                                    <div v-if="d.rh_decided_at" class="text-xs text-[#888780]">{{ d.rh_decided_at }}</div>
-                                </td>
-                                <td class="px-4 py-3">
-                                    <span class="inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold" :class="statutBadgeClass(d.statut)">
-                                        {{ d.statut_label }}
-                                    </span>
-                                </td>
-                                <td class="px-4 py-3">
-                                    <button type="button" class="inline-flex items-center gap-1 rounded border border-[#e2e0d8] px-2 py-1 text-xs hover:bg-[#FAFAF8]" @click="openView(d)">
-                                        <Eye class="h-3.5 w-3.5" /> Voir
-                                    </button>
-                                </td>
-                            </tr>
-                            <tr v-if="!historique?.length">
-                                <td colspan="7" class="px-4 py-10 text-center text-[#888780]">Aucun historique de validation.</td>
-                            </tr>
-                        </tbody>
-                    </table>
                 </div>
             </div>
         </div>
@@ -451,15 +667,12 @@ function onEditFile(e: Event) {
                     <div><dt class="text-[11px] font-bold uppercase text-[#888780]">Employé</dt><dd>{{ viewDecl.user?.name }} — {{ viewDecl.user?.email }}</dd></div>
                     <div><dt class="text-[11px] font-bold uppercase text-[#888780]">Type</dt><dd>{{ viewDecl.type_label }}</dd></div>
                     <div><dt class="text-[11px] font-bold uppercase text-[#888780]">Période</dt><dd>{{ periode(viewDecl) }}</dd></div>
-                    <div v-if="viewDecl.lieu"><dt class="text-[11px] font-bold uppercase text-[#888780]">Lieu</dt><dd>{{ viewDecl.lieu }}</dd></div>
+                    <div><dt class="text-[11px] font-bold uppercase text-[#888780]">Jours</dt><dd>{{ viewDecl.nb_jours ?? 1 }}</dd></div>
+                    <div><dt class="text-[11px] font-bold uppercase text-[#888780]">Date de reprise</dt><dd>{{ viewDecl.date_reprise_display || '—' }}</dd></div>
+                    <div v-if="viewDecl.lieu"><dt class="text-[11px] font-bold uppercase text-[#888780]">Lieu / Mission</dt><dd>{{ viewDecl.lieu }}</dd></div>
                     <div><dt class="text-[11px] font-bold uppercase text-[#888780]">Motif</dt><dd>{{ viewDecl.motif }}</dd></div>
                     <div v-if="viewDecl.commentaire"><dt class="text-[11px] font-bold uppercase text-[#888780]">Commentaire</dt><dd>{{ viewDecl.commentaire }}</dd></div>
                     <div><dt class="text-[11px] font-bold uppercase text-[#888780]">Statut</dt><dd>{{ viewDecl.statut_label }}</dd></div>
-                    <div><dt class="text-[11px] font-bold uppercase text-[#888780]">N+1</dt><dd>{{ viewDecl.manager_user?.name || '—' }} <span v-if="viewDecl.manager_decided_at" class="text-[#888780]">({{ viewDecl.manager_decided_at }})</span></dd></div>
-                    <div v-if="viewDecl.manager_comment"><dt class="text-[11px] font-bold uppercase text-[#888780]">Commentaire N+1</dt><dd>{{ viewDecl.manager_comment }}</dd></div>
-                    <div><dt class="text-[11px] font-bold uppercase text-[#888780]">RH</dt><dd>{{ viewDecl.rh_user?.name || '—' }} <span v-if="viewDecl.rh_decided_at" class="text-[#888780]">({{ viewDecl.rh_decided_at }})</span></dd></div>
-                    <div v-if="viewDecl.rh_comment"><dt class="text-[11px] font-bold uppercase text-[#888780]">Commentaire RH</dt><dd>{{ viewDecl.rh_comment }}</dd></div>
-                    <div><dt class="text-[11px] font-bold uppercase text-[#888780]">Justificatif</dt><dd>{{ viewDecl.has_justificatif ? (viewDecl.justificatif_filename || 'Oui') : 'Non' }}</dd></div>
                 </dl>
                 <div class="mt-5 flex justify-end">
                     <button type="button" class="rounded-md border border-[#e2e0d8] px-4 py-2 text-sm" @click="viewDecl = null">Fermer</button>
@@ -467,7 +680,7 @@ function onEditFile(e: Event) {
             </div>
         </div>
 
-        <!-- Modifier (superadmin) -->
+        <!-- Modifier -->
         <div v-if="editDecl" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="editDecl = null">
             <div class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-[10px] bg-white p-5 shadow-xl">
                 <h2 class="text-lg font-semibold text-[#0C447C]">Modifier #{{ editDecl.id }}</h2>
@@ -528,6 +741,68 @@ function onEditFile(e: Event) {
                         <button type="submit" :disabled="editForm.processing" class="rounded-md bg-[#185FA5] px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Enregistrer</button>
                     </div>
                 </form>
+            </div>
+        </div>
+        <!-- Confirmation validation / rejet (image 1) -->
+        <div
+            v-if="confirmDecision"
+            class="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4"
+            @click.self="confirmDecision = null"
+        >
+            <div class="w-full max-w-md rounded-2xl bg-white px-6 py-8 text-center shadow-xl">
+                <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#FFF4E5]">
+                    <CircleAlert class="h-9 w-9 text-[#F59E0B]" />
+                </div>
+                <h2 class="mt-4 text-lg font-semibold text-[#1F2937]">
+                    {{ confirmDecision.accept ? 'Validation demande' : 'Rejet de la demande' }}
+                </h2>
+                <p class="mt-3 text-sm leading-relaxed text-[#4B5563]">
+                    Tu vas {{ confirmDecision.accept ? 'valider' : 'rejeter' }} la demande
+                    <strong>{{ confirmDecision.decl.type_label }}</strong>
+                    de <strong class="capitalize">{{ confirmDecision.decl.user?.name }}</strong>
+                    du <strong>{{ confirmDecision.decl.date_concernee_display }}</strong>
+                    au <strong>{{ confirmDecision.decl.date_fin_display || confirmDecision.decl.date_concernee_display }}</strong>.
+                    Merci de confirmer !
+                </p>
+                <div class="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
+                    <button
+                        type="button"
+                        class="rounded-lg bg-[#10B981] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#059669] disabled:opacity-50"
+                        :disabled="deciding"
+                        @click="confirmDecide"
+                    >
+                        Oui, Je confirme !
+                    </button>
+                    <button
+                        type="button"
+                        class="rounded-lg border border-[#D1D5DB] bg-white px-5 py-2.5 text-sm font-semibold text-[#374151] hover:bg-[#F9FAFB]"
+                        :disabled="deciding"
+                        @click="confirmDecision = null"
+                    >
+                        Annuler
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Succès (image 2) -->
+        <div
+            v-if="showSuccessModal"
+            class="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4"
+            @click.self="showSuccessModal = false"
+        >
+            <div class="w-full max-w-sm rounded-2xl bg-white px-6 py-8 text-center shadow-xl">
+                <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full border-2 border-[#86EFAC] bg-[#ECFDF5]">
+                    <Check class="h-8 w-8 text-[#059669]" />
+                </div>
+                <p class="mt-5 text-base font-semibold text-[#1F2937]">Mise à jour effectuée avec succes</p>
+                <button
+                    type="button"
+                    class="mt-6 rounded-lg bg-[#10B981] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[#059669]"
+                    @click="showSuccessModal = false"
+                >
+                    Ok,compris!
+                </button>
             </div>
         </div>
     </PointageLayout>
