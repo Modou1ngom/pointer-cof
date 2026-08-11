@@ -168,6 +168,13 @@ const form = useForm({
 
 const ui = computed(() => form.gestion_ui);
 
+const plagesForm = useForm({
+    plage_arrivee_debut: props.config.plage_arrivee_debut,
+    plage_arrivee_fin: props.config.plage_arrivee_fin,
+    plage_depart_debut: props.config.plage_depart_debut,
+    plage_depart_fin: props.config.plage_depart_fin,
+});
+
 const exportFicheUrl = computed(() => {
     const params = new URLSearchParams({ mois: exportMois.value });
     if (exportUserId.value !== 'tous') {
@@ -201,7 +208,27 @@ function isJourActif(day: number) {
 }
 
 function submit() {
-    form.post('/pointage/rh/parametrage', { preserveScroll: true });
+    form
+        .transform((data) => ({
+            ...data,
+            plage_arrivee_debut: plagesForm.plage_arrivee_debut,
+            plage_arrivee_fin: plagesForm.plage_arrivee_fin,
+            plage_depart_debut: plagesForm.plage_depart_debut,
+            plage_depart_fin: plagesForm.plage_depart_fin,
+        }))
+        .post('/pointage/rh/parametrage', { preserveScroll: true });
+}
+
+function submitPlages() {
+    plagesForm.post('/pointage/rh/parametrage/plages', {
+        preserveScroll: true,
+        onSuccess: () => {
+            form.plage_arrivee_debut = plagesForm.plage_arrivee_debut;
+            form.plage_arrivee_fin = plagesForm.plage_arrivee_fin;
+            form.plage_depart_debut = plagesForm.plage_depart_debut;
+            form.plage_depart_fin = plagesForm.plage_depart_fin;
+        },
+    });
 }
 
 onMounted(async () => {
@@ -297,23 +324,45 @@ onMounted(async () => {
                     </div>
 
                     <div class="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3">
-                        <p class="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">Plages de Pointage (Scan)</p>
+                        <div class="mb-2 flex items-center justify-between gap-3">
+                            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Plages de Pointage (Scan)</p>
+                            <button
+                                type="button"
+                                class="shrink-0 rounded-md bg-[#C8102E] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#a50d25] disabled:opacity-60"
+                                :disabled="plagesForm.processing"
+                                @click="submitPlages"
+                            >
+                                {{ plagesForm.processing ? '…' : 'Enregistrer' }}
+                            </button>
+                        </div>
                         <div class="grid gap-3 sm:grid-cols-2">
                             <div>
                                 <label class="mb-1 block text-[11px] font-semibold text-slate-500">Arrivée — début</label>
-                                <input v-model="form.plage_arrivee_debut" type="time" step="60" class="field-input" />
+                                <input v-model="plagesForm.plage_arrivee_debut" type="time" step="60" class="field-input" />
+                                <p v-if="plagesForm.errors.plage_arrivee_debut" class="mt-1 text-xs text-red-600">
+                                    {{ plagesForm.errors.plage_arrivee_debut }}
+                                </p>
                             </div>
                             <div>
                                 <label class="mb-1 block text-[11px] font-semibold text-slate-500">Arrivée — fin</label>
-                                <input v-model="form.plage_arrivee_fin" type="time" step="60" class="field-input" />
+                                <input v-model="plagesForm.plage_arrivee_fin" type="time" step="60" class="field-input" />
+                                <p v-if="plagesForm.errors.plage_arrivee_fin" class="mt-1 text-xs text-red-600">
+                                    {{ plagesForm.errors.plage_arrivee_fin }}
+                                </p>
                             </div>
                             <div>
                                 <label class="mb-1 block text-[11px] font-semibold text-slate-500">Départ — début</label>
-                                <input v-model="form.plage_depart_debut" type="time" step="60" class="field-input" />
+                                <input v-model="plagesForm.plage_depart_debut" type="time" step="60" class="field-input" />
+                                <p v-if="plagesForm.errors.plage_depart_debut" class="mt-1 text-xs text-red-600">
+                                    {{ plagesForm.errors.plage_depart_debut }}
+                                </p>
                             </div>
                             <div>
                                 <label class="mb-1 block text-[11px] font-semibold text-slate-500">Départ — fin</label>
-                                <input v-model="form.plage_depart_fin" type="time" step="60" class="field-input" />
+                                <input v-model="plagesForm.plage_depart_fin" type="time" step="60" class="field-input" />
+                                <p v-if="plagesForm.errors.plage_depart_fin" class="mt-1 text-xs text-red-600">
+                                    {{ plagesForm.errors.plage_depart_fin }}
+                                </p>
                             </div>
                         </div>
                     </div>
