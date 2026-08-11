@@ -11,6 +11,7 @@ use App\Support\PointageDeclarationTypes;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 
 class PointageDeclarationController extends Controller
@@ -383,33 +384,35 @@ class PointageDeclarationController extends Controller
             'comment' => 'nullable|string|max:1000',
         ]);
 
-        if ($validated['accept']) {
-            $declaration->update([
-                'statut' => 'valide',
-                'rh_user_id' => $user->id,
-                'rh_decided_at' => now(),
-                'rh_comment' => $validated['comment'] ?? null,
-            ]);
-            $declaration->refresh();
-            $applied = app(PointageDeclarationPresenceService::class)->appliquerApresValidationRh($declaration);
-            PointageAuditLog::record(
-                $user,
-                'DECLARATION_VAL_RH_OK',
-                'Déclaration validée RH — heures effectives 08:00/17:00 appliquées',
-                null,
-                $request->ip(),
-                'ok',
-                ['declaration_id' => $declaration->id, 'pointages_ajustes' => $applied]
-            );
-        } else {
-            $declaration->update([
-                'statut' => 'rejete',
-                'rh_user_id' => $user->id,
-                'rh_decided_at' => now(),
-                'rh_comment' => $validated['comment'] ?? null,
-            ]);
-            PointageAuditLog::record($user, 'DECLARATION_VAL_RH_KO', 'Déclaration rejetée RH', null, $request->ip(), 'alerte', ['declaration_id' => $declaration->id]);
-        }
+        DB::transaction(function () use ($validated, $declaration, $user, $request): void {
+            if ($validated['accept']) {
+                $declaration->update([
+                    'statut' => 'valide',
+                    'rh_user_id' => $user->id,
+                    'rh_decided_at' => now(),
+                    'rh_comment' => $validated['comment'] ?? null,
+                ]);
+                $declaration->refresh();
+                $applied = app(PointageDeclarationPresenceService::class)->appliquerApresValidationRh($declaration);
+                PointageAuditLog::record(
+                    $user,
+                    'DECLARATION_VAL_RH_OK',
+                    'Déclaration validée RH — heures effectives 08:00/17:00 appliquées',
+                    null,
+                    $request->ip(),
+                    'ok',
+                    ['declaration_id' => $declaration->id, 'pointages_ajustes' => $applied]
+                );
+            } else {
+                $declaration->update([
+                    'statut' => 'rejete',
+                    'rh_user_id' => $user->id,
+                    'rh_decided_at' => now(),
+                    'rh_comment' => $validated['comment'] ?? null,
+                ]);
+                PointageAuditLog::record($user, 'DECLARATION_VAL_RH_KO', 'Déclaration rejetée RH', null, $request->ip(), 'alerte', ['declaration_id' => $declaration->id]);
+            }
+        });
 
         return back()->with('success', 'Décision RH enregistrée.');
     }

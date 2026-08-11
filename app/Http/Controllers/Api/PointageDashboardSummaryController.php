@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Attendance;
 use App\Models\Pointage;
 use App\Models\PointageDeclaration;
 use App\Models\PointageHoraireProfile;
@@ -12,6 +13,7 @@ use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
+use Throwable;
 
 /**
  * Compteurs mensuels pour le tableau de bord mobile (CofiPointe).
@@ -27,8 +29,10 @@ class PointageDashboardSummaryController extends Controller
         $monthStart = $today->copy()->startOfMonth();
         $monthEnd = $today->copy()->endOfDay();
 
-        $joursOuvres = $this->joursOuvresDansPeriode($monthStart, $today);
-        $joursSet = array_fill_keys($joursOuvres, true);
+        $joursCalendrier = $this->joursOuvresDansPeriode($monthStart, $today);
+        $calendrierSet = array_fill_keys($joursCalendrier, true);
+        $joursOuvres = $joursCalendrier;
+        $joursSet = $calendrierSet;
 
         $pointages = Pointage::query()
             ->where('user_id', $user->id)
@@ -36,6 +40,22 @@ class PointageDashboardSummaryController extends Controller
             ->orderBy('clocked_at')
             ->get()
             ->groupBy(fn (Pointage $p) => $p->clocked_at->toDateString());
+
+        $attendances = Attendance::query()
+            ->where('user_id', $user->id)
+            ->whereBetween('recorded_at', [$monthStart, $monthEnd])
+            ->orderBy('recorded_at')
+            ->get()
+            ->groupBy(fn (Attendance $a) => $a->recorded_at->toDateString());
+
+        // Inclure aussi les jours pointés même s'ils ne sont pas dans le calendrier ouvrable.
+        foreach (array_unique(array_merge($pointages->keys()->all(), $attendances->keys()->all())) as $day) {
+            if (! isset($joursSet[$day])) {
+                $joursOuvres[] = $day;
+                $joursSet[$day] = true;
+            }
+        }
+        sort($joursOuvres);
 
         $coverage = $this->declarationCoverageByDay(
             $this->declarationsValides($user->id, $monthStart, $today),
@@ -50,13 +70,21 @@ class PointageDashboardSummaryController extends Controller
         foreach ($joursOuvres as $day) {
             /** @var \Illuminate\Support\Collection<int, Pointage> $items */
             $items = $pointages->get($day) ?? collect();
+            /** @var \Illuminate\Support\Collection<int, Attendance> $atts */
+            $atts = $attendances->get($day) ?? collect();
+
             $arrivee = $items->firstWhere('type', 'arrivee');
             $depart = $items
                 ->filter(fn (Pointage $p) => $p->type === 'depart')
                 ->sortByDesc(fn (Pointage $p) => $p->clocked_at->timestamp)
                 ->first();
 
-            if ($arrivee !== null || $depart !== null) {
+            $hasCheckin = $arrivee !== null
+                || $atts->contains(fn (Attendance $a) => in_array($a->type, ['checkin', 'arrivee'], true));
+            $hasCheckout = $depart !== null
+                || $atts->contains(fn (Attendance $a) => in_array($a->type, ['checkout', 'depart'], true));
+
+            if ($hasCheckin || $hasCheckout) {
                 $presents++;
                 if ($arrivee !== null && $arrivee->statut === 'retard') {
                     $retards++;
@@ -68,7 +96,7 @@ class PointageDashboardSummaryController extends Controller
             $kind = $coverage[$day] ?? null;
             if (in_array($kind, ['conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'formation', 'mission'], true)) {
                 $conges++;
-            } else {
+            } elseif (isset($calendrierSet[$day])) {
                 $absents++;
             }
         }
@@ -93,30 +121,47 @@ class PointageDashboardSummaryController extends Controller
      */
     private function joursOuvresDansPeriode(Carbon $from, Carbon $to): array
     {
-        $calendrier = app(PointageHorairesCalendrierService::class);
-        $profile = PointageHoraireProfile::query()
-            ->where('scope_type', 'global')
-            ->where('actif', true)
-            ->orderBy('id')
-            ->first()
-            ?? PointageHoraireProfile::query()->orderBy('id')->first();
+        try {
+            $calendrier = app(PointageHorairesCalendrierService::class);
+            $profile = null;
+            if (Schema::hasTable('pointage_horaire_profiles')) {
+                $profile = PointageHoraireProfile::query()
+                    ->where('scope_type', 'global')
+                    ->where('actif', true)
+                    ->orderBy('id')
+                    ->first()
+                    ?? PointageHoraireProfile::query()->orderBy('id')->first();
+            }
 
-        $feries = $profile !== null ? $calendrier->feriesChargees() : null;
-        $out = [];
-        $d = $from->copy()->startOfDay();
-        $end = $to->copy()->startOfDay();
-        while ($d->lte($end)) {
-            if ($profile === null) {
+            $feries = $profile !== null ? $calendrier->feriesChargees() : null;
+            $out = [];
+            $d = $from->copy()->startOfDay();
+            $end = $to->copy()->startOfDay();
+            while ($d->lte($end)) {
+                if ($profile === null) {
+                    if (! $d->isWeekend()) {
+                        $out[] = $d->toDateString();
+                    }
+                } elseif ($calendrier->jourCompteDansBasePresence($d, $profile, $feries)) {
+                    $out[] = $d->toDateString();
+                }
+                $d->addDay();
+            }
+
+            return $out;
+        } catch (Throwable) {
+            $out = [];
+            $d = $from->copy()->startOfDay();
+            $end = $to->copy()->startOfDay();
+            while ($d->lte($end)) {
                 if (! $d->isWeekend()) {
                     $out[] = $d->toDateString();
                 }
-            } elseif ($calendrier->jourCompteDansBasePresence($d, $profile, $feries)) {
-                $out[] = $d->toDateString();
+                $d->addDay();
             }
-            $d->addDay();
-        }
 
-        return $out;
+            return $out;
+        }
     }
 
     /**
