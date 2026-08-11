@@ -86,6 +86,7 @@ const moduleNavItems = computed<NavItem[]>(() => {
     const pointageItems: NavItem[] = [
         { title: 'Dashboard', href: '/pointage/rh/presence/recuperation-pointages', icon: LayoutGrid },
         { title: 'Demande', href: '/pointage/demandes', icon: Scale },
+        { title: 'Validation N+1', href: '/pointage/declarations/validation-manager', icon: ShieldCheck },
         { title: 'Reporting RH', href: '/pointage/rapport/reporting', icon: FileSpreadsheet },
         { title: 'Synthèse journalière', href: '/pointage/rh/tous-pointages', icon: ListChecks },
     ];

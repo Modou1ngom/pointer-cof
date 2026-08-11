@@ -290,7 +290,8 @@ function onEditFile(e: Event) {
 }
 
 function canDecide(d: Decl): boolean {
-    return props.can_validate_rh && ['en_attente_rh', 'en_attente_manager'].includes(d.statut);
+    // RH : uniquement après le N+1 (ou envoi direct RH si pas de N+1).
+    return props.can_validate_rh && d.statut === 'en_attente_rh';
 }
 
 function isTermine(d: Decl): boolean {
@@ -320,7 +321,7 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                 <div>
                     <h1 class="text-xl font-semibold text-[#0C447C]">Demande</h1>
                     <p class="mt-1 text-sm text-[#888780]">
-                        Suivi et validation RH des déclarations (mission, absence, permission, congé, formation…).
+                        Double validation : N+1 puis RH. Actions : voir, rejeter, valider, modifier, supprimer.
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
@@ -502,6 +503,24 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                                                 @click="askDecideRh(d, true)"
                                             >
                                                 <Check class="h-4 w-4" />
+                                            </button>
+                                        </template>
+                                        <template v-if="can_manage">
+                                            <button
+                                                type="button"
+                                                class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#e2e0d8] text-[#185FA5] hover:bg-[#E6F1FB]"
+                                                title="Modifier"
+                                                @click="openEdit(d)"
+                                            >
+                                                <Pencil class="h-4 w-4" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#FCEBEB] text-[#A32D2D] hover:bg-[#FCEBEB]"
+                                                title="Supprimer"
+                                                @click="destroyDecl(d)"
+                                            >
+                                                <Trash2 class="h-4 w-4" />
                                             </button>
                                         </template>
                                     </div>

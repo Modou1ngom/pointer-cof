@@ -227,7 +227,7 @@ class PointageDeclarationController extends Controller
             ],
             'types' => PointageDeclarationTypes::optionsForApi(),
             'counts' => $counts,
-            'can_manage' => (bool) $user->isSuperAdmin(),
+            'can_manage' => (bool) ($user->isRh() || $user->isAdmin() || $user->isSuperAdmin()),
             'can_validate_rh' => (bool) ($user->isRh() || $user->isAdmin() || $user->isSuperAdmin()),
         ]);
     }
@@ -235,7 +235,7 @@ class PointageDeclarationController extends Controller
     public function update(Request $request, PointageDeclaration $declaration)
     {
         $user = Auth::user();
-        abort_unless($user && $user->isSuperAdmin(), 403);
+        abort_unless($user && ($user->isRh() || $user->isAdmin() || $user->isSuperAdmin()), 403);
 
         $type = PointageDeclarationTypes::normalize((string) $request->input('type', $declaration->type));
         $request->merge(['type' => $type]);
@@ -290,7 +290,7 @@ class PointageDeclarationController extends Controller
     public function destroy(Request $request, PointageDeclaration $declaration)
     {
         $user = Auth::user();
-        abort_unless($user && $user->isSuperAdmin(), 403);
+        abort_unless($user && ($user->isRh() || $user->isAdmin() || $user->isSuperAdmin()), 403);
 
         $id = $declaration->id;
         $declaration->delete();
@@ -398,8 +398,9 @@ class PointageDeclarationController extends Controller
         $accept = $request->boolean('accept');
         $comment = $request->input('comment');
 
-        // RH peut valider les demandes en attente RH (et celles encore en attente N+1, comme avant).
-        if (! in_array($declaration->statut, ['en_attente_rh', 'en_attente_manager'], true)) {
+        // Double validation : le RH traite uniquement après le N+1 (statut en_attente_rh).
+        // Sans N+1 sur le profil, la demande arrive déjà en en_attente_rh.
+        if ($declaration->statut !== 'en_attente_rh') {
             if ($declaration->statut === 'valide' && $accept) {
                 $applied = app(PointageDeclarationPresenceService::class)->appliquerApresValidationRh($declaration);
 
@@ -414,6 +415,7 @@ class PointageDeclarationController extends Controller
             $msg = match ($declaration->statut) {
                 'valide' => 'Cette demande est déjà validée.',
                 'rejete' => 'Cette demande a déjà été rejetée.',
+                'en_attente_manager' => 'Cette demande attend d’abord la validation du N+1. Validez-la ensuite côté RH.',
                 default => 'Cette demande ne peut plus être traitée (statut : '.$declaration->statut.').',
             };
 
