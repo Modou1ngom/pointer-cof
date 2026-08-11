@@ -717,10 +717,18 @@ class PointageRapportController extends Controller
         }
 
         $byDept = $this->presenceParDepartementPourJour($dateRef, $userIds);
-        $alertes = $todayStats['retards'] + $todayStats['absents'];
+        $alertesDetail = $this->alertesRhPourJour($dateRef, $userIds, $todayStats);
+
+        $moyenne7j = count($evolution) > 0
+            ? round(array_sum(array_column($evolution, 'taux')) / count($evolution), 1)
+            : 0.0;
+        $objectifPresence = 95;
+
+        $pct = fn (int $n): float => $effectif > 0 ? round(100 * $n / $effectif, 1) : 0.0;
 
         return [
             'date_label' => FrenchDateFormat::dateLong($dateRef),
+            'date_short' => $dateRef->locale('fr')->isoFormat('D MMMM YYYY'),
             'kpis' => [
                 'effectif' => $effectif,
                 'effectif_delta' => 0,
@@ -728,31 +736,103 @@ class PointageRapportController extends Controller
                 'presents_pct' => $presentsPct,
                 'presents_delta_pct' => $presentsPct - $yestPresentsPct,
                 'retards' => $todayStats['retards'],
+                'retards_pct' => $pct($todayStats['retards']),
                 'retards_delta_pct' => $this->pctDelta($todayStats['retards'], $yestStats['retards']),
                 'absents' => $todayStats['absents'],
+                'absents_pct' => $pct($todayStats['absents']),
                 'absents_delta_pct' => $this->pctDelta($todayStats['absents'], $yestStats['absents']),
                 'conges' => $todayStats['conges'],
+                'conges_pct' => $pct($todayStats['conges']),
                 'conges_delta' => $todayStats['conges'] - $yestStats['conges'],
                 'missions' => $todayStats['missions'],
+                'missions_pct' => $pct($todayStats['missions']),
                 'missions_delta' => $todayStats['missions'] - $yestStats['missions'],
                 'heures_sup' => $this->heures->formatMinutes($heuresSupMinutes),
                 'heures_sup_delta' => $this->heures->formatMinutes($heuresSupMinutes - $prevSupMinutes),
                 'heures_sup_delta_positive' => ($heuresSupMinutes - $prevSupMinutes) >= 0,
             ],
             'evolution_7j' => $evolution,
-            'presence_departements' => $byDept,
-            'repartition' => [
-                'total' => $effectif,
-                'presents' => $todayStats['presents'],
-                'presents_pct' => $presentsPct,
-                'absents' => $todayStats['absents'],
-                'absents_pct' => $effectif > 0 ? round(100 * $todayStats['absents'] / $effectif, 1) : 0,
-                'conges' => $todayStats['conges'],
-                'conges_pct' => $effectif > 0 ? round(100 * $todayStats['conges'] / $effectif, 1) : 0,
-                'missions' => $todayStats['missions'],
-                'missions_pct' => $effectif > 0 ? round(100 * $todayStats['missions'] / $effectif, 1) : 0,
+            'evolution_meta' => [
+                'moyenne_7j' => $moyenne7j,
+                'mois_en_cours' => $presentsPct,
+                'mois_delta_pct' => $presentsPct - $yestPresentsPct,
+                'objectif' => $objectifPresence,
             ],
-            'alertes' => $alertes,
+            'presence_departements' => $byDept,
+            'repartition' => $this->repartitionStatutsDetail($dateRef, $userIds),
+            'alertes' => array_sum(array_column($alertesDetail, 'count')),
+            'alertes_list' => $alertesDetail,
+            'statut_types' => [
+                ['value' => 'absence', 'label' => 'Absence'],
+                ['value' => 'conge_annuel', 'label' => 'Congé annuel'],
+                ['value' => 'conge_maladie', 'label' => 'Congé maladie'],
+                ['value' => 'permission_exceptionnelle', 'label' => 'Permission exceptionnelle'],
+                ['value' => 'mission', 'label' => 'Mission'],
+                ['value' => 'formation', 'label' => 'Formation'],
+            ],
+        ];
+    }
+
+    /**
+     * @param  list<int>  $userIds
+     * @param  array{presents: int, retards: int, absents: int, conges: int, missions: int}  $todayStats
+     * @return list<array{id: string, label: string, count: int, severity: string}>
+     */
+    private function alertesRhPourJour(Carbon $day, array $userIds, array $todayStats): array
+    {
+        $heureDepartRef = $this->hhmmToMinutes((string) config('pointage.heure_depart', '17:00'));
+
+        $pointages = Pointage::query()
+            ->whereIn('user_id', $userIds ?: [0])
+            ->whereDate('clocked_at', $day->toDateString())
+            ->orderBy('clocked_at')
+            ->get()
+            ->groupBy('user_id');
+
+        $retards15 = 0;
+        $oublis = 0;
+        $departsAnticipes = 0;
+        $anomalies = 0;
+
+        foreach ($userIds as $uid) {
+            /** @var Collection<int, Pointage> $items */
+            $items = $pointages->get($uid) ?? collect();
+            $arrivee = $items->firstWhere('type', 'arrivee');
+            $depart = $items
+                ->filter(fn (Pointage $p) => $p->type === 'depart')
+                ->sortByDesc(fn (Pointage $p) => $p->clocked_at->timestamp)
+                ->first();
+
+            if ($arrivee !== null && $arrivee->statut === 'retard') {
+                $eff = $this->effectiveMinutes($arrivee);
+                $ref = $this->hhmmToMinutes((string) config('pointage.heure_arrivee', '08:00'));
+                if (($eff - $ref) > 15) {
+                    $retards15++;
+                }
+            }
+
+            if ($arrivee !== null && $depart === null) {
+                $oublis++;
+                $anomalies++;
+            } elseif ($arrivee === null && $depart !== null) {
+                $anomalies++;
+            }
+
+            if ($depart !== null && $this->effectiveMinutes($depart) < $heureDepartRef) {
+                $departsAnticipes++;
+            }
+
+            if ($items->contains(fn (Pointage $p) => ! $p->qr_verified)) {
+                $anomalies++;
+            }
+        }
+
+        return [
+            ['id' => 'retards_15', 'label' => 'Retards > 15 min', 'count' => $retards15, 'severity' => 'orange'],
+            ['id' => 'absences', 'label' => 'Absences non justifiées', 'count' => $todayStats['absents'], 'severity' => 'red'],
+            ['id' => 'oublis', 'label' => 'Oubli de pointage', 'count' => $oublis, 'severity' => 'orange'],
+            ['id' => 'departs', 'label' => 'Départs avant l’heure', 'count' => $departsAnticipes, 'severity' => 'orange'],
+            ['id' => 'anomalies', 'label' => 'Anomalies de pointage', 'count' => $anomalies, 'severity' => 'red'],
         ];
     }
 
@@ -818,7 +898,7 @@ class PointageRapportController extends Controller
             $kind = $coverage[$day->toDateString()] ?? null;
             if ($kind === 'mission') {
                 $missions++;
-            } elseif ($kind === 'conge') {
+            } elseif (in_array($kind, ['conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'formation'], true)) {
                 $conges++;
             } else {
                 $absents++;
@@ -829,8 +909,81 @@ class PointageRapportController extends Controller
     }
 
     /**
+     * Répartition des 6 statuts métier (hors présents) pour le donut Reporting RH.
+     *
      * @param  list<int>  $userIds
-     * @return list<array{nom: string, taux: int}>
+     * @return array{total: int, items: list<array{value: string, label: string, count: int, pct: float, color: string}>}
+     */
+    private function repartitionStatutsDetail(Carbon $day, array $userIds): array
+    {
+        $order = [
+            'absence' => '#EF4444',
+            'conge_annuel' => '#A855F7',
+            'conge_maladie' => '#EC4899',
+            'permission_exceptionnelle' => '#F59E0B',
+            'mission' => '#14B8A6',
+            'formation' => '#3B82F6',
+        ];
+        $counts = array_fill_keys(array_keys($order), 0);
+
+        $joursSet = [$day->toDateString() => true];
+        $isOuvre = in_array($day->toDateString(), $this->joursOuvresDansPeriode($day, $day), true);
+        if (! $isOuvre) {
+            return $this->formatRepartitionStatuts($counts, $order);
+        }
+
+        $pointagesByUser = Pointage::query()
+            ->whereIn('user_id', $userIds ?: [0])
+            ->whereDate('clocked_at', $day->toDateString())
+            ->get()
+            ->groupBy('user_id');
+        $declsByUser = $this->declarationsValidesParUser($userIds, $day, $day);
+
+        foreach ($userIds as $uid) {
+            $items = $pointagesByUser->get($uid) ?? collect();
+            if ($items->isNotEmpty()) {
+                continue;
+            }
+            $coverage = $this->declarationCoverageByDay(
+                $declsByUser->get($uid) ?? collect(),
+                $joursSet,
+            );
+            $kind = $coverage[$day->toDateString()] ?? 'absence';
+            if (! isset($counts[$kind])) {
+                $kind = 'absence';
+            }
+            $counts[$kind]++;
+        }
+
+        return $this->formatRepartitionStatuts($counts, $order);
+    }
+
+    /**
+     * @param  array<string, int>  $counts
+     * @param  array<string, string>  $order
+     * @return array{total: int, items: list<array{value: string, label: string, count: int, pct: float, color: string}>}
+     */
+    private function formatRepartitionStatuts(array $counts, array $order): array
+    {
+        $total = array_sum($counts);
+        $items = [];
+        foreach ($order as $value => $color) {
+            $count = (int) ($counts[$value] ?? 0);
+            $items[] = [
+                'value' => $value,
+                'label' => PointageDeclarationTypes::label($value),
+                'count' => $count,
+                'pct' => $total > 0 ? round(100 * $count / $total, 1) : 0.0,
+                'color' => $color,
+            ];
+        }
+
+        return ['total' => $total, 'items' => $items];
+    }
+
+    /**
+     * @param  list<int>  $userIds
+     * @return list<array{nom: string, taux: int, presents: int, effectif: int}>
      */
     private function presenceParDepartementPourJour(Carbon $day, array $userIds): array
     {
@@ -863,6 +1016,8 @@ class PointageRapportController extends Controller
         foreach ($groups as $nom => $g) {
             $out[] = [
                 'nom' => $nom,
+                'presents' => $g['presents'],
+                'effectif' => $g['effectif'],
                 'taux' => $g['effectif'] > 0 ? (int) round(100 * $g['presents'] / $g['effectif']) : 0,
             ];
         }
@@ -1180,7 +1335,7 @@ class PointageRapportController extends Controller
                 $kind = $coverage[$day] ?? null;
                 if ($kind === 'mission') {
                     $stats[$groupe]['missions']++;
-                } elseif ($kind === 'conge') {
+                } elseif (in_array($kind, ['conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'formation'], true)) {
                     $stats[$groupe]['conges']++;
                 } else {
                     // null = non justifié ; 'absence' = déclaration d’absence validée
@@ -1269,7 +1424,11 @@ class PointageRapportController extends Controller
             $type = PointageDeclarationTypes::normalize((string) $d->type);
             $kind = match ($type) {
                 'mission' => 'mission',
-                'conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'formation', 'regularisation' => 'conge',
+                'conge_annuel' => 'conge_annuel',
+                'conge_maladie' => 'conge_maladie',
+                'permission_exceptionnelle' => 'permission_exceptionnelle',
+                'formation' => 'formation',
+                'absence' => 'absence',
                 default => 'absence',
             };
 

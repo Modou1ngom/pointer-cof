@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AttendanceVirtualOtpController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DeviceController;
 use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\PointageDashboardSummaryController;
 use App\Http\Controllers\Api\PointageTodayController;
 use App\Http\Controllers\Api\Pointrust\QrController;
 use App\Http\Controllers\Api\ProfileController;
@@ -34,6 +35,7 @@ Route::middleware(['auth:sanctum', 'reject_otp_pending'])->group(function () {
     Route::post('/declarations', [\App\Http\Controllers\Api\DeclarationController::class, 'store'])->middleware('throttle:30,1');
     Route::get('/declarations/{declaration}', [\App\Http\Controllers\Api\DeclarationController::class, 'show'])->middleware('throttle:120,1');
     Route::get('/pointage/today', [PointageTodayController::class, 'show'])->middleware('throttle:120,1');
+    Route::get('/pointage/dashboard-summary', [PointageDashboardSummaryController::class, 'show'])->middleware('throttle:120,1');
     Route::get('/profile', [ProfileController::class, 'show'])->middleware('throttle:120,1');
     Route::get('/notifications', [NotificationController::class, 'index'])->middleware('throttle:120,1');
 });
