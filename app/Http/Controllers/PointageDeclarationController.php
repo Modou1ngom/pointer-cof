@@ -365,17 +365,19 @@ class PointageDeclarationController extends Controller
             return back()->with('error', $msg);
         }
 
-        $validated = $request->validate([
-            'accept' => 'required|boolean',
+        $request->validate([
+            'accept' => 'required',
             'comment' => 'nullable|string|max:1000',
         ]);
+        $accept = $request->boolean('accept');
+        $comment = $request->input('comment');
 
-        if ($validated['accept']) {
+        if ($accept) {
             $declaration->update([
                 'statut' => 'en_attente_rh',
                 'manager_user_id' => $user->id,
                 'manager_decided_at' => now(),
-                'manager_comment' => $validated['comment'] ?? null,
+                'manager_comment' => is_string($comment) ? $comment : null,
             ]);
             PointageAuditLog::record($user, 'DECLARATION_VAL_MANAGER_OK', 'Transmis RH', null, $request->ip(), 'ok', ['declaration_id' => $declaration->id]);
         } else {
@@ -383,7 +385,7 @@ class PointageDeclarationController extends Controller
                 'statut' => 'rejete',
                 'manager_user_id' => $user->id,
                 'manager_decided_at' => now(),
-                'manager_comment' => $validated['comment'] ?? null,
+                'manager_comment' => is_string($comment) ? $comment : null,
             ]);
             PointageAuditLog::record($user, 'DECLARATION_VAL_MANAGER_KO', 'Rejet manager', null, $request->ip(), 'alerte', ['declaration_id' => $declaration->id]);
         }
