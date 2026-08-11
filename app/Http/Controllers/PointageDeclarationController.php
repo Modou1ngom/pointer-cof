@@ -404,7 +404,26 @@ class PointageDeclarationController extends Controller
         $user = Auth::user();
         abort_unless($user && ($user->isRh() || $user->isAdmin() || $user->isSuperAdmin()), 403);
 
+        $request->validate([
+            'accept' => 'required',
+            'comment' => 'nullable|string|max:1000',
+        ]);
+        // Inertia envoie souvent "true"/"false" (string) : éviter le 422 de la règle boolean.
+        $accept = $request->boolean('accept');
+        $comment = $request->input('comment');
+
         if ($declaration->statut !== 'en_attente_rh') {
+            if ($declaration->statut === 'valide' && $accept) {
+                $applied = app(PointageDeclarationPresenceService::class)->appliquerApresValidationRh($declaration);
+
+                return back()->with(
+                    'success',
+                    $applied > 0
+                        ? 'Demande déjà validée — pointages resynchronisés.'
+                        : 'Cette demande est déjà validée.'
+                );
+            }
+
             $msg = match ($declaration->statut) {
                 'valide' => 'Cette demande est déjà validée.',
                 'rejete' => 'Cette demande a déjà été rejetée.',
@@ -425,19 +444,14 @@ class PointageDeclarationController extends Controller
             );
         }
 
-        $validated = $request->validate([
-            'accept' => 'required|boolean',
-            'comment' => 'nullable|string|max:1000',
-        ]);
-
         try {
-            DB::transaction(function () use ($validated, $declaration, $user, $request): void {
-                if ($validated['accept']) {
+            DB::transaction(function () use ($accept, $comment, $declaration, $user, $request): void {
+                if ($accept) {
                     $declaration->update([
                         'statut' => 'valide',
                         'rh_user_id' => $user->id,
                         'rh_decided_at' => now(),
-                        'rh_comment' => $validated['comment'] ?? null,
+                        'rh_comment' => is_string($comment) ? $comment : null,
                     ]);
                     $declaration->refresh();
                     $applied = app(PointageDeclarationPresenceService::class)->appliquerApresValidationRh($declaration);
@@ -455,7 +469,7 @@ class PointageDeclarationController extends Controller
                         'statut' => 'rejete',
                         'rh_user_id' => $user->id,
                         'rh_decided_at' => now(),
-                        'rh_comment' => $validated['comment'] ?? null,
+                        'rh_comment' => is_string($comment) ? $comment : null,
                     ]);
                     PointageAuditLog::record($user, 'DECLARATION_VAL_RH_KO', 'Déclaration rejetée RH', null, $request->ip(), 'alerte', ['declaration_id' => $declaration->id]);
                 }
