@@ -337,7 +337,17 @@ class PointageDeclarationController extends Controller
     {
         $user = Auth::user();
         abort_unless($user && $this->userCanValidateAsManager($user, $declaration), 403);
-        abort_unless($declaration->statut === 'en_attente_manager', 422);
+
+        if ($declaration->statut !== 'en_attente_manager') {
+            $msg = match ($declaration->statut) {
+                'en_attente_rh' => 'Cette demande est déjà transmise au RH.',
+                'valide' => 'Cette demande est déjà validée.',
+                'rejete' => 'Cette demande a déjà été rejetée.',
+                default => 'Cette demande ne peut plus être traitée par le manager.',
+            };
+
+            return back()->with('error', $msg);
+        }
 
         $validated = $request->validate([
             'accept' => 'required|boolean',
@@ -377,42 +387,58 @@ class PointageDeclarationController extends Controller
     {
         $user = Auth::user();
         abort_unless($user && ($user->isRh() || $user->isAdmin() || $user->isSuperAdmin()), 403);
-        abort_unless($declaration->statut === 'en_attente_rh', 422);
+
+        if ($declaration->statut !== 'en_attente_rh') {
+            $msg = match ($declaration->statut) {
+                'valide' => 'Cette demande est déjà validée.',
+                'rejete' => 'Cette demande a déjà été rejetée.',
+                'en_attente_manager' => 'Cette demande attend encore la validation du manager (N+1).',
+                default => 'Cette demande ne peut plus être traitée (statut : '.$declaration->statut.').',
+            };
+
+            return back()->with('error', $msg);
+        }
 
         $validated = $request->validate([
             'accept' => 'required|boolean',
             'comment' => 'nullable|string|max:1000',
         ]);
 
-        DB::transaction(function () use ($validated, $declaration, $user, $request): void {
-            if ($validated['accept']) {
-                $declaration->update([
-                    'statut' => 'valide',
-                    'rh_user_id' => $user->id,
-                    'rh_decided_at' => now(),
-                    'rh_comment' => $validated['comment'] ?? null,
-                ]);
-                $declaration->refresh();
-                $applied = app(PointageDeclarationPresenceService::class)->appliquerApresValidationRh($declaration);
-                PointageAuditLog::record(
-                    $user,
-                    'DECLARATION_VAL_RH_OK',
-                    'Déclaration validée RH — heures effectives 08:00/17:00 appliquées',
-                    null,
-                    $request->ip(),
-                    'ok',
-                    ['declaration_id' => $declaration->id, 'pointages_ajustes' => $applied]
-                );
-            } else {
-                $declaration->update([
-                    'statut' => 'rejete',
-                    'rh_user_id' => $user->id,
-                    'rh_decided_at' => now(),
-                    'rh_comment' => $validated['comment'] ?? null,
-                ]);
-                PointageAuditLog::record($user, 'DECLARATION_VAL_RH_KO', 'Déclaration rejetée RH', null, $request->ip(), 'alerte', ['declaration_id' => $declaration->id]);
-            }
-        });
+        try {
+            DB::transaction(function () use ($validated, $declaration, $user, $request): void {
+                if ($validated['accept']) {
+                    $declaration->update([
+                        'statut' => 'valide',
+                        'rh_user_id' => $user->id,
+                        'rh_decided_at' => now(),
+                        'rh_comment' => $validated['comment'] ?? null,
+                    ]);
+                    $declaration->refresh();
+                    $applied = app(PointageDeclarationPresenceService::class)->appliquerApresValidationRh($declaration);
+                    PointageAuditLog::record(
+                        $user,
+                        'DECLARATION_VAL_RH_OK',
+                        'Déclaration validée RH — heures effectives 08:00/17:00 appliquées',
+                        null,
+                        $request->ip(),
+                        'ok',
+                        ['declaration_id' => $declaration->id, 'pointages_ajustes' => $applied]
+                    );
+                } else {
+                    $declaration->update([
+                        'statut' => 'rejete',
+                        'rh_user_id' => $user->id,
+                        'rh_decided_at' => now(),
+                        'rh_comment' => $validated['comment'] ?? null,
+                    ]);
+                    PointageAuditLog::record($user, 'DECLARATION_VAL_RH_KO', 'Déclaration rejetée RH', null, $request->ip(), 'alerte', ['declaration_id' => $declaration->id]);
+                }
+            });
+        } catch (\Throwable $e) {
+            report($e);
+
+            return back()->with('error', 'La validation a échoué : '.$e->getMessage());
+        }
 
         return back()->with('success', 'Décision RH enregistrée.');
     }

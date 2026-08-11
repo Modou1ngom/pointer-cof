@@ -65,8 +65,12 @@ const props = defineProps<{
 
 const page = usePage();
 const flashSuccess = computed(() => {
-    const flash = page.props.flash as { success?: string } | undefined;
+    const flash = page.props.flash as { success?: string; error?: string } | undefined;
     return flash?.success ?? null;
+});
+const flashError = computed(() => {
+    const flash = page.props.flash as { success?: string; error?: string } | undefined;
+    return flash?.error ?? null;
 });
 
 const typesFiltres = computed(() =>
@@ -331,6 +335,7 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
             </div>
 
             <p v-if="flashSuccess" class="rounded-md bg-[#EAF3DE] px-3 py-2 text-sm text-[#3B6D11]">{{ flashSuccess }}</p>
+            <p v-if="flashError" class="rounded-md bg-[#FCEBEB] px-3 py-2 text-sm text-[#791F1F]">{{ flashError }}</p>
 
             <!-- Onglets style image 1 -->
             <div class="rounded-[12px] border border-[#e2e0d8] bg-white shadow-sm">
