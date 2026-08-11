@@ -148,24 +148,43 @@ const rep = computed(() => props.dashboard.repartition);
 const meta = computed(() => props.dashboard.evolution_meta);
 
 const evolutionGeom = computed(() => {
-    const data = props.dashboard.evolution_7j;
+    const data = props.dashboard.evolution_7j ?? [];
     const w = 340;
     const h = 150;
     const padL = 36;
     const padR = 12;
     const padT = 22;
     const padB = 18;
-    const min = 80;
-    const max = 100;
+    const rates = data.map((d) => Number(d.taux) || 0);
+    let min = rates.length ? Math.min(...rates) : 0;
+    let max = rates.length ? Math.max(...rates) : 100;
+    if (max === min) {
+        min = Math.max(0, min - 10);
+        max = Math.min(100, max + 10);
+        if (max === min) {
+            max = min + 10;
+        }
+    } else {
+        const pad = Math.max(2, (max - min) * 0.15);
+        min = Math.max(0, Math.floor(min - pad));
+        max = Math.min(100, Math.ceil(max + pad));
+        if (max <= min) {
+            max = min + 1;
+        }
+    }
     const span = max - min;
+    const yFor = (taux: number) => padT + ((max - taux) / span) * (h - padT - padB);
     const points = data.map((d, i) => {
         const x = padL + (i * (w - padL - padR)) / Math.max(1, data.length - 1);
-        const y = padT + ((max - d.taux) / span) * (h - padT - padB);
+        const y = yFor(Number(d.taux) || 0);
         return { x, y, ...d };
     });
     const polyline = points.map((p) => `${p.x},${p.y}`).join(' ');
     const last = points[points.length - 1] ?? null;
-    return { w, h, padL, padR, padT, padB, min, max, points, polyline, last };
+    const ticks = [min, Math.round((min + max) / 2), max].filter(
+        (v, i, arr) => arr.indexOf(v) === i,
+    );
+    return { w, h, padL, padR, padT, padB, min, max, span, yFor, points, polyline, last, ticks };
 });
 
 const donutStyle = computed(() => {
@@ -507,20 +526,51 @@ function exportUrl(format: 'csv' | 'pdf'): string {
                         </div>
                     </div>
                     <svg :viewBox="`0 0 ${evolutionGeom.w} ${evolutionGeom.h}`" class="mt-2 h-44 w-full" role="img" aria-label="Évolution du taux de présence">
-                        <line v-for="y in [80, 85, 90, 95, 100]" :key="y"
-                            :x1="evolutionGeom.padL" :x2="evolutionGeom.w - evolutionGeom.padR"
-                            :y1="evolutionGeom.padT + ((100 - y) / 20) * (evolutionGeom.h - evolutionGeom.padT - evolutionGeom.padB)"
-                            :y2="evolutionGeom.padT + ((100 - y) / 20) * (evolutionGeom.h - evolutionGeom.padT - evolutionGeom.padB)"
-                            stroke="#F1F5F9" stroke-width="1" />
-                        <text v-for="y in [80, 90, 100]" :key="'t'+y"
+                        <line
+                            v-for="y in evolutionGeom.ticks"
+                            :key="'g'+y"
+                            :x1="evolutionGeom.padL"
+                            :x2="evolutionGeom.w - evolutionGeom.padR"
+                            :y1="evolutionGeom.yFor(y)"
+                            :y2="evolutionGeom.yFor(y)"
+                            stroke="#F1F5F9"
+                            stroke-width="1"
+                        />
+                        <text
+                            v-for="y in evolutionGeom.ticks"
+                            :key="'t'+y"
                             :x="4"
-                            :y="evolutionGeom.padT + ((100 - y) / 20) * (evolutionGeom.h - evolutionGeom.padT - evolutionGeom.padB) + 3"
-                            font-size="9" fill="#94A3B8">{{ y }}%</text>
-                        <polyline fill="none" stroke="#3B82F6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" :points="evolutionGeom.polyline" />
+                            :y="evolutionGeom.yFor(y) + 3"
+                            font-size="9"
+                            fill="#94A3B8"
+                        >{{ y }}%</text>
+                        <polyline
+                            v-if="evolutionGeom.polyline"
+                            fill="none"
+                            stroke="#3B82F6"
+                            stroke-width="3"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            :points="evolutionGeom.polyline"
+                        />
                         <template v-if="evolutionGeom.last">
                             <circle :cx="evolutionGeom.last.x" :cy="evolutionGeom.last.y" r="5" fill="#3B82F6" />
-                            <rect :x="evolutionGeom.last.x - 22" :y="evolutionGeom.last.y - 28" width="44" height="20" rx="6" fill="#2563EB" />
-                            <text :x="evolutionGeom.last.x" :y="evolutionGeom.last.y - 14" text-anchor="middle" fill="white" font-size="11" font-weight="700">{{ evolutionGeom.last.taux }}%</text>
+                            <rect
+                                :x="Math.min(evolutionGeom.last.x - 22, evolutionGeom.w - 48)"
+                                :y="Math.max(4, evolutionGeom.last.y - 28)"
+                                width="44"
+                                height="20"
+                                rx="6"
+                                fill="#2563EB"
+                            />
+                            <text
+                                :x="Math.min(evolutionGeom.last.x, evolutionGeom.w - 26)"
+                                :y="Math.max(18, evolutionGeom.last.y - 14)"
+                                text-anchor="middle"
+                                fill="white"
+                                font-size="11"
+                                font-weight="700"
+                            >{{ evolutionGeom.last.taux }}%</text>
                         </template>
                     </svg>
                     <div class="mt-1 flex justify-between px-8 text-[10px] text-slate-400">

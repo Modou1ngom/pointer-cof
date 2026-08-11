@@ -909,7 +909,7 @@ class PointageRapportController extends Controller
     }
 
     /**
-     * Répartition des 6 statuts métier (hors présents) pour le donut Reporting RH.
+     * Répartition des statuts (Présent + types de déclaration) pour le donut Reporting RH.
      *
      * @param  list<int>  $userIds
      * @return array{total: int, items: list<array{value: string, label: string, count: int, pct: float, color: string}>}
@@ -917,6 +917,7 @@ class PointageRapportController extends Controller
     private function repartitionStatutsDetail(Carbon $day, array $userIds): array
     {
         $order = [
+            'present' => '#22C55E',
             'absence' => '#EF4444',
             'conge_annuel' => '#A855F7',
             'conge_maladie' => '#EC4899',
@@ -928,9 +929,6 @@ class PointageRapportController extends Controller
 
         $joursSet = [$day->toDateString() => true];
         $isOuvre = in_array($day->toDateString(), $this->joursOuvresDansPeriode($day, $day), true);
-        if (! $isOuvre) {
-            return $this->formatRepartitionStatuts($counts, $order);
-        }
 
         $pointagesByUser = Pointage::query()
             ->whereIn('user_id', $userIds ?: [0])
@@ -942,8 +940,15 @@ class PointageRapportController extends Controller
         foreach ($userIds as $uid) {
             $items = $pointagesByUser->get($uid) ?? collect();
             if ($items->isNotEmpty()) {
+                $counts['present']++;
+
                 continue;
             }
+
+            if (! $isOuvre) {
+                continue;
+            }
+
             $coverage = $this->declarationCoverageByDay(
                 $declsByUser->get($uid) ?? collect(),
                 $joursSet,
@@ -971,7 +976,7 @@ class PointageRapportController extends Controller
             $count = (int) ($counts[$value] ?? 0);
             $items[] = [
                 'value' => $value,
-                'label' => PointageDeclarationTypes::label($value),
+                'label' => $value === 'present' ? 'Présent' : PointageDeclarationTypes::label($value),
                 'count' => $count,
                 'pct' => $total > 0 ? round(100 * $count / $total, 1) : 0.0,
                 'color' => $color,

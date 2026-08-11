@@ -1108,12 +1108,14 @@ class PointageController extends Controller
             'plage_depart_fin' => 'required|date_format:H:i|different:plage_depart_debut',
             'tolerance_minutes' => 'required|integer|min:0|max:180',
             'seuil_heures_supplementaires_h_jour' => 'required|numeric|min:0|max:24',
+            'seuil_heures_supplementaires_h_semaine' => 'nullable|numeric|min:0|max:168',
             'delai_validation_manager_heures' => 'required|integer|min:1|max:720',
             'relances_automatiques_apres_heures' => 'required|integer|min:1|max:720',
             'employe_penalty_retard_fcfa' => 'required|integer|min:0',
             'penalite_absence_injustifiee_fcfa_jour' => 'required|integer|min:0',
             'majoration_heures_sup_pct' => 'required|integer|min:0|max:200',
             'mode_export_sage_paie' => 'required|in:mensuel_auto_1er,mensuel_manuel,hebdomadaire',
+            'gestion_ui' => 'nullable|array',
         ], [
             'plage_arrivee_fin.different' => 'La fin de la plage arrivée doit être différente du début (plage passant minuit autorisée).',
             'plage_depart_fin.different' => 'La fin de la plage départ doit être différente du début (ex. 15:00 → 01:00 autorisé).',
@@ -1123,6 +1125,10 @@ class PointageController extends Controller
         foreach ($motifKeys as $mk) {
             $motifs[$mk] = (bool) ($request->boolean('declaration_motifs_autorises.'.$mk));
         }
+
+        $gestionUi = is_array($request->input('gestion_ui'))
+            ? $this->normalizeGestionHorairesUi($request->input('gestion_ui'))
+            : $this->defaultGestionHorairesUi();
 
         $payload = [
             'heure_arrivee' => $validated['heure_arrivee'],
@@ -1135,6 +1141,7 @@ class PointageController extends Controller
             'plage_depart_fin' => $validated['plage_depart_fin'],
             'tolerance_minutes' => (int) $validated['tolerance_minutes'],
             'seuil_heures_supplementaires_h_jour' => (float) $validated['seuil_heures_supplementaires_h_jour'],
+            'seuil_heures_supplementaires_h_semaine' => (float) ($validated['seuil_heures_supplementaires_h_semaine'] ?? 40),
             'delai_validation_manager_heures' => (int) $validated['delai_validation_manager_heures'],
             'relances_automatiques_apres_heures' => (int) $validated['relances_automatiques_apres_heures'],
             'employe_penalty_retard_fcfa' => (int) $validated['employe_penalty_retard_fcfa'],
@@ -1142,13 +1149,18 @@ class PointageController extends Controller
             'majoration_heures_sup_pct' => (int) $validated['majoration_heures_sup_pct'],
             'mode_export_sage_paie' => $validated['mode_export_sage_paie'],
             'declaration_motifs_autorises' => $motifs,
+            'gestion_ui' => $gestionUi,
+            'updated_by_name' => $user->name,
+            'updated_at_label' => now()->format('d/m/Y H:i'),
         ];
 
         $row = PointageRhSetting::query()->first();
         if ($row === null) {
             PointageRhSetting::query()->create(['payload' => $payload]);
         } else {
-            $row->update(['payload' => $payload]);
+            /** @var array<string, mixed> $existing */
+            $existing = is_array($row->payload) ? $row->payload : [];
+            $row->update(['payload' => array_merge($existing, $payload)]);
         }
 
         return redirect()->route('pointage.rh.parametrage')->with('success', 'Paramètres enregistrés.');
@@ -1232,6 +1244,13 @@ class PointageController extends Controller
             'deuil' => 'Deuil',
         ];
 
+        $row = PointageRhSetting::query()->first();
+        /** @var array<string, mixed> $stored */
+        $stored = is_array($row?->payload) ? $row->payload : [];
+        $gestionUi = $this->normalizeGestionHorairesUi(
+            is_array($stored['gestion_ui'] ?? null) ? $stored['gestion_ui'] : []
+        );
+
         return [
             'config' => [
                 'heure_arrivee' => (string) config('pointage.heure_arrivee'),
@@ -1245,6 +1264,7 @@ class PointageController extends Controller
                 'tolerance_minutes' => (int) config('pointage.tolerance_minutes'),
                 'base_heures_jour_reference' => (float) config('pointage.base_heures_jour_reference', 8),
                 'seuil_heures_supplementaires_h_jour' => (float) config('pointage.seuil_heures_supplementaires_h_jour', 9),
+                'seuil_heures_supplementaires_h_semaine' => (float) ($stored['seuil_heures_supplementaires_h_semaine'] ?? 40),
                 'delai_validation_manager_heures' => (int) config('pointage.delai_validation_manager_heures', 48),
                 'relances_automatiques_apres_heures' => (int) config('pointage.relances_automatiques_apres_heures', 24),
                 'employe_penalty_retard_fcfa' => (int) config('pointage.employe_penalty_retard_fcfa'),
@@ -1252,6 +1272,7 @@ class PointageController extends Controller
                 'majoration_heures_sup_pct' => (int) config('pointage.majoration_heures_sup_pct', 25),
                 'mode_export_sage_paie' => (string) config('pointage.mode_export_sage_paie', 'mensuel_auto_1er'),
                 'declaration_motifs_autorises' => $motifs,
+                'gestion_ui' => $gestionUi,
             ],
             'mode_export_options' => [
                 ['value' => 'mensuel_auto_1er', 'label' => 'Mensuel automatique (le 1er)'],
@@ -1261,7 +1282,106 @@ class PointageController extends Controller
             'motif_labels' => $motifLabels,
             'export_employes' => app(PointageFicheHorairesService::class)->employesActifsPourExport(),
             'export_mois_defaut' => Carbon::now()->format('Y-m'),
+            'meta' => [
+                'updated_at_label' => (string) ($stored['updated_at_label'] ?? ''),
+                'updated_by_name' => (string) ($stored['updated_by_name'] ?? ''),
+                'geofencing_radius' => (int) config('pointage.default_geofencing_radius_metres', 100),
+                'qr_ttl_seconds' => (int) config('pointage.qr_dynamic_ttl_seconds', 30),
+            ],
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function defaultGestionHorairesUi(): array
+    {
+        return [
+            'pauses_active' => true,
+            'pause_obligatoire' => true,
+            'pause_duree' => '01:00',
+            'pause_minimum' => '00:30',
+            'pause_maximum' => '02:00',
+            'pause_deduire_auto' => true,
+            'pause_controler_insuffisantes' => true,
+            'methode_qr' => true,
+            'methode_biometrie' => true,
+            'methode_mobile' => true,
+            'methode_badge' => true,
+            'comptage_entree' => true,
+            'comptage_sortie' => true,
+            'comptage_pauses' => true,
+            'autoriser_plusieurs_entrees_sorties' => true,
+            'empecher_double_pointage' => true,
+            'arrondi_minutes' => 10,
+            'secu_gps' => true,
+            'secu_wifi' => true,
+            'secu_appareils' => true,
+            'secu_qr' => true,
+            'secu_anti_capture' => true,
+            'secu_enregistrer_appareil' => true,
+            'rayon_gps_metres' => (int) config('pointage.default_geofencing_radius_metres', 100),
+            'qr_validite_secondes' => (int) config('pointage.qr_dynamic_ttl_seconds', 30),
+            'tentatives_max' => 3,
+            'retard_a_partir' => '08:15',
+            'depart_anticipe_apres' => '16:45',
+            'absence_apres' => '04:00',
+            'calcul_retard_auto' => true,
+            'calcul_depart_anticipe_auto' => true,
+            'generer_anomalies' => true,
+            'anomalie_entree_sans_sortie' => true,
+            'anomalie_sortie_sans_entree' => true,
+            'anomalie_double_pointage' => true,
+            'anomalie_hors_plage' => true,
+            'anomalie_retard_important' => true,
+            'anomalie_depart_anticipe' => true,
+            'anomalie_journee_incomplete' => true,
+            'hs_calcul_auto' => true,
+            'hs_autorisation_obligatoire' => true,
+            'hs_validation_par' => 'manager',
+            'majoration_nuit_pct' => 50,
+            'majoration_dimanche_pct' => 50,
+            'majoration_ferie_pct' => 100,
+            'profil_horaire' => 'bureau_standard',
+            'jours_travailles' => [1, 2, 3, 4, 5],
+            'jours_feries_mode' => 'bloquer',
+            'correction_employe' => true,
+            'validation_manager' => true,
+            'validation_rh' => true,
+            'conserver_ancien_pointage' => true,
+            'motif_obligatoire' => true,
+            'justificatif_obligatoire' => false,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $input
+     * @return array<string, mixed>
+     */
+    private function normalizeGestionHorairesUi(array $input): array
+    {
+        $defaults = $this->defaultGestionHorairesUi();
+        $out = $defaults;
+
+        foreach ($defaults as $key => $default) {
+            if (! array_key_exists($key, $input)) {
+                continue;
+            }
+            $value = $input[$key];
+            if (is_bool($default)) {
+                $out[$key] = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+            } elseif (is_int($default)) {
+                $out[$key] = (int) $value;
+            } elseif (is_array($default)) {
+                $out[$key] = is_array($value)
+                    ? array_values(array_map('intval', $value))
+                    : $default;
+            } else {
+                $out[$key] = is_scalar($value) ? (string) $value : $default;
+            }
+        }
+
+        return $out;
     }
 
     public function adminQrcodes(PointageQrService $qrService)
