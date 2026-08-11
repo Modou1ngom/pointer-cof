@@ -89,7 +89,13 @@ class PointageDeclarationController extends Controller
 
         $user->profilCollaborateurAssocie();
         $profil = $user->profil;
-        $statut = ($profil && $profil->n_plus_1_id) ? 'en_attente_manager' : 'en_attente_rh';
+        if (! $profil?->n_plus_1_id) {
+            return back()
+                ->withInput()
+                ->with('error', 'Impossible de soumettre : aucun N+1 n’est défini sur votre profil. La validation N+1 puis RH est obligatoire.');
+        }
+
+        $statut = 'en_attente_manager';
 
         PointageDeclaration::create([
             'user_id' => $user->id,
@@ -107,11 +113,8 @@ class PointageDeclarationController extends Controller
 
         PointageAuditLog::record($user, 'DECLARATION_SOUMISE', 'Nouvelle déclaration pointage', null, $request->ip(), 'ok');
 
-        $msg = $statut === 'en_attente_manager'
-            ? 'Déclaration envoyée à votre N+1 pour validation.'
-            : 'Déclaration envoyée au RH pour validation.';
-
-        return redirect()->route('pointage.declarations.index')->with('success', $msg);
+        return redirect()->route('pointage.declarations.index')
+            ->with('success', 'Déclaration envoyée à votre N+1. Elle devra ensuite être validée par le RH.');
     }
 
     public function demande(Request $request)
@@ -265,7 +268,20 @@ class PointageDeclarationController extends Controller
         ]);
 
         if (isset($validated['statut']) && is_string($validated['statut'])) {
-            $declaration->statut = $validated['statut'];
+            $newStatut = $validated['statut'];
+            if ($newStatut === 'valide' && ($declaration->manager_decided_at === null || $declaration->manager_user_id === null)) {
+                return back()->with(
+                    'error',
+                    'Impossible de passer en « validé » sans décision N+1. Le circuit N+1 puis RH est obligatoire.'
+                );
+            }
+            if ($newStatut === 'en_attente_rh' && ($declaration->manager_decided_at === null || $declaration->manager_user_id === null)) {
+                return back()->with(
+                    'error',
+                    'Impossible de passer en attente RH sans validation N+1 préalable.'
+                );
+            }
+            $declaration->statut = $newStatut;
         }
 
         $declaration->save();
@@ -392,11 +408,21 @@ class PointageDeclarationController extends Controller
             $msg = match ($declaration->statut) {
                 'valide' => 'Cette demande est déjà validée.',
                 'rejete' => 'Cette demande a déjà été rejetée.',
-                'en_attente_manager' => 'Cette demande attend encore la validation du manager (N+1).',
+                'en_attente_manager' => 'Cette demande attend encore la validation du manager (N+1). Le RH ne peut valider qu’après le N+1.',
                 default => 'Cette demande ne peut plus être traitée (statut : '.$declaration->statut.').',
             };
 
             return back()->with('error', $msg);
+        }
+
+        if ($declaration->manager_decided_at === null || $declaration->manager_user_id === null) {
+            // Anciennes demandes passées directement au RH : renvoyer vers N+1.
+            $declaration->update(['statut' => 'en_attente_manager']);
+
+            return back()->with(
+                'error',
+                'Validation N+1 manquante. La demande a été renvoyée en attente du manager. N+1 puis RH sont obligatoires.'
+            );
         }
 
         $validated = $request->validate([
@@ -540,23 +566,18 @@ class PointageDeclarationController extends Controller
     private function processusEtapes(PointageDeclaration $d): array
     {
         $statut = (string) $d->statut;
-        $hasN1 = $d->manager_user_id !== null || $statut === 'en_attente_manager' || $d->manager_decided_at !== null;
 
         $soumisDone = true;
         $n1Current = $statut === 'en_attente_manager';
-        $n1Done = in_array($statut, ['en_attente_rh', 'valide', 'rejete'], true) && ($hasN1 || $d->manager_decided_at);
-        // Si passé directement RH sans N+1
-        if ($statut === 'en_attente_rh' && $d->manager_user_id === null && $d->manager_decided_at === null) {
-            $n1Done = true;
-            $n1Current = false;
-        }
+        $n1Done = $d->manager_decided_at !== null
+            && in_array($statut, ['en_attente_rh', 'valide', 'rejete'], true);
         if ($statut === 'rejete' && $d->manager_decided_at && ! $d->rh_decided_at) {
             $n1Done = true;
             $n1Current = false;
         }
 
-        $rhCurrent = $statut === 'en_attente_rh';
-        $rhDone = in_array($statut, ['valide', 'rejete'], true) && ($d->rh_decided_at !== null || $statut === 'valide');
+        $rhCurrent = $statut === 'en_attente_rh' && $d->manager_decided_at !== null;
+        $rhDone = $d->rh_decided_at !== null && in_array($statut, ['valide', 'rejete'], true);
 
         if ($statut === 'rejete' && $d->manager_decided_at && ! $d->rh_decided_at) {
             $rhDone = false;
@@ -566,7 +587,7 @@ class PointageDeclarationController extends Controller
         return [
             ['key' => 'soumis', 'label' => 'Soumise', 'done' => $soumisDone, 'current' => false],
             ['key' => 'n1', 'label' => 'N+1', 'done' => (bool) $n1Done, 'current' => $n1Current],
-            ['key' => 'rh', 'label' => 'RH', 'done' => (bool) $rhDone || $statut === 'valide', 'current' => $rhCurrent],
+            ['key' => 'rh', 'label' => 'RH', 'done' => (bool) $rhDone, 'current' => $rhCurrent],
             ['key' => 'final', 'label' => $statut === 'rejete' ? 'Rejetée' : 'Validée', 'done' => in_array($statut, ['valide', 'rejete'], true), 'current' => false],
         ];
     }
@@ -636,7 +657,7 @@ class PointageDeclarationController extends Controller
         if (! $profil?->n_plus_1_id) {
             return [
                 'manager_nom' => null,
-                'validation_hint' => 'Votre déclaration sera soumise directement à la RH pour validation.',
+                'validation_hint' => 'Aucun N+1 n’est défini sur votre profil. Affectez un N+1 : la validation N+1 puis RH est obligatoire.',
             ];
         }
 

@@ -59,7 +59,14 @@ class DeclarationController extends Controller
 
         $user->profilCollaborateurAssocie();
         $profil = $user->profil;
-        $statut = ($profil && $profil->n_plus_1_id) ? 'en_attente_manager' : 'en_attente_rh';
+        if (! $profil?->n_plus_1_id) {
+            return response()->json([
+                'message' => 'Impossible de soumettre : aucun N+1 n’est défini sur votre profil. La validation N+1 puis RH est obligatoire.',
+                'error' => 'n_plus_1_requis',
+            ], 422);
+        }
+
+        $statut = 'en_attente_manager';
 
         $declaration = PointageDeclaration::query()->create([
             'user_id' => $user->id,
@@ -86,9 +93,7 @@ class DeclarationController extends Controller
         );
 
         return response()->json([
-            'message' => $statut === 'en_attente_manager'
-                ? 'Déclaration envoyée à votre N+1 pour validation.'
-                : 'Déclaration envoyée au RH pour validation.',
+            'message' => 'Déclaration envoyée à votre N+1. Elle devra ensuite être validée par le RH.',
             'data' => $this->serialize($declaration),
         ], 201);
     }
