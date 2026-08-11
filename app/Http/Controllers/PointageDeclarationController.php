@@ -89,13 +89,7 @@ class PointageDeclarationController extends Controller
 
         $user->profilCollaborateurAssocie();
         $profil = $user->profil;
-        if (! $profil?->n_plus_1_id) {
-            return back()
-                ->withInput()
-                ->with('error', 'Impossible de soumettre : aucun N+1 n’est défini sur votre profil. La validation N+1 puis RH est obligatoire.');
-        }
-
-        $statut = 'en_attente_manager';
+        $statut = ($profil && $profil->n_plus_1_id) ? 'en_attente_manager' : 'en_attente_rh';
 
         PointageDeclaration::create([
             'user_id' => $user->id,
@@ -113,8 +107,11 @@ class PointageDeclarationController extends Controller
 
         PointageAuditLog::record($user, 'DECLARATION_SOUMISE', 'Nouvelle déclaration pointage', null, $request->ip(), 'ok');
 
-        return redirect()->route('pointage.declarations.index')
-            ->with('success', 'Déclaration envoyée à votre N+1. Elle devra ensuite être validée par le RH.');
+        $msg = $statut === 'en_attente_manager'
+            ? 'Déclaration envoyée à votre N+1 pour validation.'
+            : 'Déclaration envoyée au RH pour validation.';
+
+        return redirect()->route('pointage.declarations.index')->with('success', $msg);
     }
 
     public function demande(Request $request)
@@ -268,20 +265,7 @@ class PointageDeclarationController extends Controller
         ]);
 
         if (isset($validated['statut']) && is_string($validated['statut'])) {
-            $newStatut = $validated['statut'];
-            if ($newStatut === 'valide' && ($declaration->manager_decided_at === null || $declaration->manager_user_id === null)) {
-                return back()->with(
-                    'error',
-                    'Impossible de passer en « validé » sans décision N+1. Le circuit N+1 puis RH est obligatoire.'
-                );
-            }
-            if ($newStatut === 'en_attente_rh' && ($declaration->manager_decided_at === null || $declaration->manager_user_id === null)) {
-                return back()->with(
-                    'error',
-                    'Impossible de passer en attente RH sans validation N+1 préalable.'
-                );
-            }
-            $declaration->statut = $newStatut;
+            $declaration->statut = $validated['statut'];
         }
 
         $declaration->save();
@@ -414,7 +398,8 @@ class PointageDeclarationController extends Controller
         $accept = $request->boolean('accept');
         $comment = $request->input('comment');
 
-        if ($declaration->statut !== 'en_attente_rh') {
+        // RH peut valider les demandes en attente RH (et celles encore en attente N+1, comme avant).
+        if (! in_array($declaration->statut, ['en_attente_rh', 'en_attente_manager'], true)) {
             if ($declaration->statut === 'valide' && $accept) {
                 $applied = app(PointageDeclarationPresenceService::class)->appliquerApresValidationRh($declaration);
 
@@ -429,21 +414,10 @@ class PointageDeclarationController extends Controller
             $msg = match ($declaration->statut) {
                 'valide' => 'Cette demande est déjà validée.',
                 'rejete' => 'Cette demande a déjà été rejetée.',
-                'en_attente_manager' => 'Cette demande attend encore la validation du manager (N+1). Le RH ne peut valider qu’après le N+1.',
                 default => 'Cette demande ne peut plus être traitée (statut : '.$declaration->statut.').',
             };
 
             return back()->with('error', $msg);
-        }
-
-        if ($declaration->manager_decided_at === null || $declaration->manager_user_id === null) {
-            // Anciennes demandes passées directement au RH : renvoyer vers N+1.
-            $declaration->update(['statut' => 'en_attente_manager']);
-
-            return back()->with(
-                'error',
-                'Validation N+1 manquante. La demande a été renvoyée en attente du manager. N+1 puis RH sont obligatoires.'
-            );
         }
 
         try {
@@ -673,7 +647,7 @@ class PointageDeclarationController extends Controller
         if (! $profil?->n_plus_1_id) {
             return [
                 'manager_nom' => null,
-                'validation_hint' => 'Aucun N+1 n’est défini sur votre profil. Affectez un N+1 : la validation N+1 puis RH est obligatoire.',
+                'validation_hint' => 'Votre déclaration sera soumise directement à la RH pour validation.',
             ];
         }
 

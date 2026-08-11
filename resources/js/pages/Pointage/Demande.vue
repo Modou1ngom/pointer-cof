@@ -290,12 +290,7 @@ function onEditFile(e: Event) {
 }
 
 function canDecide(d: Decl): boolean {
-    // RH uniquement après validation N+1 (statut en_attente_rh + décision manager).
-    return (
-        props.can_validate_rh &&
-        d.statut === 'en_attente_rh' &&
-        Boolean(d.manager_decided_at)
-    );
+    return props.can_validate_rh && ['en_attente_rh', 'en_attente_manager'].includes(d.statut);
 }
 
 function isTermine(d: Decl): boolean {
@@ -303,11 +298,11 @@ function isTermine(d: Decl): boolean {
 }
 
 function n1Done(d: Decl): boolean {
-    return Boolean(d.manager_decided_at);
+    return Boolean(d.manager_decided_at) || ['en_attente_rh', 'valide', 'rejete'].includes(d.statut);
 }
 
 function rhDone(d: Decl): boolean {
-    return Boolean(d.rh_decided_at) || d.statut === 'valide';
+    return Boolean(d.rh_decided_at) || d.statut === 'valide' || d.statut === 'rejete';
 }
 
 function dateEnregistrement(d: Decl): string {
@@ -325,7 +320,7 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                 <div>
                     <h1 class="text-xl font-semibold text-[#0C447C]">Demande</h1>
                     <p class="mt-1 text-sm text-[#888780]">
-                        Circuit obligatoire : validation N+1 puis RH (les deux étapes).
+                        Suivi et validation RH des déclarations (mission, absence, permission, congé, formation…).
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
