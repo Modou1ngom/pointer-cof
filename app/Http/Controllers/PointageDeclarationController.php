@@ -463,7 +463,8 @@ class PointageDeclarationController extends Controller
 
     private function userCanValidateAsManager(\App\Models\User $user, PointageDeclaration $declaration): bool
     {
-        if ($user->isAdmin() || $user->isSuperAdmin()) {
+        // RH / Admin / Superadmin peuvent traiter l’étape N+1 depuis Demande.
+        if ($user->isRh() || $user->isAdmin() || $user->isSuperAdmin()) {
             return true;
         }
 

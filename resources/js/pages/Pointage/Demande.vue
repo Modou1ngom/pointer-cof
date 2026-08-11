@@ -257,14 +257,18 @@ const confirmDecision = ref<{ decl: Decl; accept: boolean } | null>(null);
 const showSuccessModal = ref(false);
 const deciding = ref(false);
 
-function askDecideRh(d: Decl, accept: boolean) {
+function askDecide(d: Decl, accept: boolean) {
     confirmDecision.value = { decl: d, accept };
 }
 
-function decideRh(id: number, accept: boolean) {
+function decide(id: number, accept: boolean, statut: string) {
     deciding.value = true;
+    const url =
+        statut === 'en_attente_manager'
+            ? `/pointage/declarations/${id}/decision-manager`
+            : `/pointage/declarations/${id}/decision-rh`;
     router.post(
-        `/pointage/declarations/${id}/decision-rh`,
+        url,
         { accept, comment: '' },
         {
             preserveScroll: true,
@@ -281,7 +285,8 @@ function decideRh(id: number, accept: boolean) {
 
 function confirmDecide() {
     if (!confirmDecision.value) return;
-    decideRh(confirmDecision.value.decl.id, confirmDecision.value.accept);
+    const d = confirmDecision.value.decl;
+    decide(d.id, confirmDecision.value.accept, d.statut);
 }
 
 function onEditFile(e: Event) {
@@ -290,8 +295,15 @@ function onEditFile(e: Event) {
 }
 
 function canDecide(d: Decl): boolean {
-    // RH : uniquement après le N+1 (ou envoi direct RH si pas de N+1).
-    return props.can_validate_rh && d.statut === 'en_attente_rh';
+    // Afficher Valider/Rejeter pour les 2 étapes en attente (N+1 puis RH).
+    return props.can_validate_rh && ['en_attente_manager', 'en_attente_rh'].includes(d.statut);
+}
+
+function decideLabel(d: Decl, accept: boolean): string {
+    if (d.statut === 'en_attente_manager') {
+        return accept ? 'Valider (N+1)' : 'Rejeter (N+1)';
+    }
+    return accept ? 'Valider (RH)' : 'Rejeter (RH)';
 }
 
 function isTermine(d: Decl): boolean {
@@ -491,16 +503,16 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                                             <button
                                                 type="button"
                                                 class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#FFE4E6] text-[#E11D48] hover:bg-[#FECDD3]"
-                                                title="Rejeter"
-                                                @click="askDecideRh(d, false)"
+                                                :title="decideLabel(d, false)"
+                                                @click="askDecide(d, false)"
                                             >
                                                 <X class="h-4 w-4" />
                                             </button>
                                             <button
                                                 type="button"
                                                 class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#D1FAE5] text-[#059669] hover:bg-[#A7F3D0]"
-                                                title="Valider"
-                                                @click="askDecideRh(d, true)"
+                                                :title="decideLabel(d, true)"
+                                                @click="askDecide(d, true)"
                                             >
                                                 <Check class="h-4 w-4" />
                                             </button>
@@ -624,16 +636,16 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                                             <button
                                                 type="button"
                                                 class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#FFE4E6] text-[#E11D48] hover:bg-[#FECDD3]"
-                                                title="Rejeter"
-                                                @click="askDecideRh(d, false)"
+                                                :title="decideLabel(d, false)"
+                                                @click="askDecide(d, false)"
                                             >
                                                 <X class="h-4 w-4" />
                                             </button>
                                             <button
                                                 type="button"
                                                 class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#D1FAE5] text-[#059669] hover:bg-[#A7F3D0]"
-                                                title="Valider"
-                                                @click="askDecideRh(d, true)"
+                                                :title="decideLabel(d, true)"
+                                                @click="askDecide(d, true)"
                                             >
                                                 <Check class="h-4 w-4" />
                                             </button>
@@ -778,10 +790,13 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                     <CircleAlert class="h-9 w-9 text-[#F59E0B]" />
                 </div>
                 <h2 class="mt-4 text-lg font-semibold text-[#1F2937]">
-                    {{ confirmDecision.accept ? 'Validation demande' : 'Rejet de la demande' }}
+                    {{ decideLabel(confirmDecision.decl, confirmDecision.accept) }}
                 </h2>
                 <p class="mt-3 text-sm leading-relaxed text-[#4B5563]">
-                    Tu vas {{ confirmDecision.accept ? 'valider' : 'rejeter' }} la demande
+                    Tu vas {{ confirmDecision.accept ? 'valider' : 'rejeter' }}
+                    <span v-if="confirmDecision.decl.statut === 'en_attente_manager'"> (étape N+1)</span>
+                    <span v-else> (étape RH)</span>
+                    la demande
                     <strong>{{ confirmDecision.decl.type_label }}</strong>
                     de <strong class="capitalize">{{ confirmDecision.decl.user?.name }}</strong>
                     du <strong>{{ confirmDecision.decl.date_concernee_display }}</strong>
