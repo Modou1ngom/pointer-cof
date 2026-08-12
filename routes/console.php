@@ -19,3 +19,8 @@ Schedule::command('pointage:feries-prolonger-recurrence')
 Schedule::command('pointage:feries-auto-pointage')
     ->dailyAt('00:05')
     ->timezone(config('app.timezone', 'UTC'));
+
+// Complète la sortie auto férié après l’heure de départ prévue.
+Schedule::command('pointage:feries-auto-pointage')
+    ->dailyAt('17:10')
+    ->timezone(config('app.timezone', 'UTC'));

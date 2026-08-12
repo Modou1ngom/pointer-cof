@@ -192,6 +192,13 @@ final class PointageJourFerieAutoPointageService
             $created++;
         }
 
+        // Ne créer la sortie auto qu’après l’heure de départ prévue
+        // (évite d’afficher « Sortie 17h00 » dès le matin).
+        $now = Carbon::now();
+        if ($now->lt($departAt)) {
+            return $created;
+        }
+
         $alreadyDepart = Pointage::query()
             ->where('user_id', $user->id)
             ->where('type', 'depart')

@@ -28,9 +28,9 @@ class CheckRole
 
         // Les admins normaux ont accès à toutes les routes dans leur environnement
         // (ils doivent avoir au moins une filiale assignée)
-        if ($user->isAdmin() && !$user->isSuperAdmin()) {
-            $userFiliales = $user->filiales()->get();
-            if ($userFiliales->isNotEmpty()) {
+        if ($user->isAdmin() && ! $user->isSuperAdmin()) {
+            $user->loadMissing('filiales');
+            if ($user->filiales->isNotEmpty()) {
                 return $next($request);
             }
         }

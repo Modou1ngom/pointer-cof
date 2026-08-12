@@ -3,8 +3,8 @@
 namespace App\Http\Middleware;
 
 use App\Models\PointageDeclaration;
-use Illuminate\Foundation\Inspiring;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -37,34 +37,53 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
-        [$message, $author] = str(Inspiring::quotes()->random())->explode('-');
-
         $user = $request->user();
-        $profil = null;
+        $profilPayload = null;
         $roles = [];
 
         if ($user) {
-            $user->load('roles');
+            $user->loadMissing('roles');
             $user->profilCollaborateurAssocie();
-            $profil = $user->profil;
-            $roles = $user->roles->pluck('slug')->toArray();
+            if ($user->profil) {
+                $user->profil->loadMissing('roles');
+                $p = $user->profil;
+                $profilPayload = [
+                    'id' => $p->id,
+                    'nom' => $p->nom,
+                    'prenom' => $p->prenom,
+                    'email' => $p->email,
+                    'fonction' => $p->fonction,
+                    'departement' => $p->departement,
+                    'site' => $p->site,
+                ];
+            }
+            $roles = array_values(array_unique(array_merge(
+                $user->roles->pluck('slug')->all(),
+                $user->profil?->roles->pluck('slug')->all() ?? [],
+            )));
         }
 
         return [
             ...parent::share($request),
-            /** Jeton CSRF à jour pour les requêtes fetch hors Inertia (le meta du layout initial peut être périmé). */
             'csrf_token' => csrf_token(),
             'flash' => [
                 'success' => $request->session()->get('success'),
                 'error' => $request->session()->get('error'),
-                /** Jeton court après validation OTP pointage (une requête, côté client → formulaire final). */
                 'otp_session_token' => $request->session()->get('otp_session_token'),
             ],
             'name' => config('app.name'),
-            'quote' => ['message' => trim($message), 'author' => trim($author)],
+            'quote' => ['message' => '', 'author' => ''],
             'auth' => [
-                'user' => $user,
-                'profil' => $profil,
+                'user' => $user ? [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'avatar' => $user->avatar_url,
+                    'email_verified_at' => $user->email_verified_at?->toIso8601String(),
+                    'created_at' => $user->created_at?->toIso8601String(),
+                    'updated_at' => $user->updated_at?->toIso8601String(),
+                ] : null,
+                'profil' => $profilPayload,
                 'roles' => $roles,
                 'isAdmin' => $user ? $user->isAdmin() : false,
                 'isSuperAdmin' => $user ? $user->isSuperAdmin() : false,
@@ -77,7 +96,7 @@ class HandleInertiaRequests extends Middleware
                 'isExecuteurIt' => $user ? $user->isExecuteurIt() : false,
                 'isResponsableDepartement' => $user ? $user->isResponsableDepartement() : false,
                 'pointageRhDeclarationsPendingCount' => $user && $user->isRh()
-                    ? (int) PointageDeclaration::query()->where('statut', 'en_attente_rh')->count()
+                    ? (int) Cache::remember('pointage.rh.pending_declarations', 20, fn () => PointageDeclaration::query()->where('statut', 'en_attente_rh')->count())
                     : 0,
             ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',

@@ -42,6 +42,29 @@ class Pointage extends Model
         return $this->belongsTo(Agence::class, 'agence_id');
     }
 
+    /**
+     * Pointage généré automatiquement (férié / déclaration RH), pas un scan réel.
+     */
+    public function isSynthetic(): bool
+    {
+        if ($this->statut === 'ferie_auto') {
+            return true;
+        }
+
+        $meta = is_array($this->meta) ? $this->meta : [];
+        if (($meta['auto_ferie'] ?? false) === true) {
+            return true;
+        }
+        if (($meta['source'] ?? null) === 'declaration_rh') {
+            return true;
+        }
+        if (($meta['requested_type'] ?? null) === 'auto') {
+            return true;
+        }
+
+        return false;
+    }
+
     public function heureAffichee(): string
     {
         $meta = $this->meta ?? [];

@@ -3,6 +3,7 @@
 namespace App\Services\Pointage;
 
 use App\Models\Agence;
+use App\Models\Attendance;
 use App\Models\Pointage;
 use App\Models\User;
 use App\Support\PointageDeviceDayGuard;
@@ -58,11 +59,15 @@ final class PointagePunchService
         $type = (string) $resolved['type'];
 
         $today = Carbon::today();
+        // Un scan réel remplace les pointages synthétiques (férié auto / déclaration RH).
+        $this->purgeSyntheticPunchesForType($user->id, $type, $today);
+
         $exists = Pointage::query()
             ->where('user_id', $user->id)
             ->where('type', $type)
             ->whereDate('clocked_at', $today)
-            ->exists();
+            ->get()
+            ->contains(fn (Pointage $p) => ! $p->isSynthetic());
 
         if ($exists) {
             $libelle = $type === 'arrivee' ? 'd\'arrivée' : 'de départ';
@@ -166,5 +171,33 @@ final class PointagePunchService
                 'pointrust' => $request->header('X-Pointrust-App') ? true : null,
             ]
         ), static fn ($v) => $v !== null && $v !== '');
+    }
+
+    private function purgeSyntheticPunchesForType(int $userId, string $type, Carbon $day): void
+    {
+        $synthetics = Pointage::query()
+            ->where('user_id', $userId)
+            ->where('type', $type)
+            ->whereDate('clocked_at', $day)
+            ->get()
+            ->filter(fn (Pointage $p) => $p->isSynthetic());
+
+        if ($synthetics->isEmpty()) {
+            return;
+        }
+
+        $attendanceType = $type === 'arrivee' ? 'checkin' : 'checkout';
+        Attendance::query()
+            ->where('user_id', $userId)
+            ->whereIn('type', [$attendanceType, $type])
+            ->whereDate('recorded_at', $day)
+            ->where(function ($q): void {
+                $q->where('qr_payload', 'like', 'declaration:%')
+                    ->orWhereNull('qr_payload')
+                    ->orWhere('qr_payload', '');
+            })
+            ->delete();
+
+        Pointage::query()->whereIn('id', $synthetics->pluck('id'))->delete();
     }
 }

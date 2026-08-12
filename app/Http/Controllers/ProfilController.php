@@ -9,12 +9,14 @@ use App\Models\Filiale;
 use App\Models\Profil;
 use App\Models\Role;
 use App\Models\User;
+use App\Support\SqlSafe;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password;
 use Inertia\Inertia;
 use Maatwebsite\Excel\Facades\Excel;
 
@@ -727,7 +729,7 @@ class ProfilController extends Controller
             $rules['create_compte'] = 'nullable|boolean';
             $rules['compte_is_active'] = 'nullable|boolean';
             $rules['compte_must_change_password'] = 'nullable|boolean';
-            $rules['compte_password'] = 'nullable|string|min:8|confirmed';
+            $rules['compte_password'] = ['nullable', 'string', Password::defaults(), 'confirmed'];
             $rules['compte_role_ids'] = 'nullable|array';
             $rules['compte_role_ids.*'] = 'integer|exists:roles,id';
         }
@@ -1032,8 +1034,8 @@ class ProfilController extends Controller
                             $mainKeyword = ! empty($keywords) ? $keywords[0] : $departementNormalized;
 
                             // Chercher les départements existants qui contiennent ce mot-clé
-                            $existingDepartements = Departement::whereRaw('UPPER(TRIM(nom)) LIKE ?', ["%{$mainKeyword}%"])
-                                ->orWhereRaw('UPPER(TRIM(REPLACE(REPLACE(nom, "DIRECTION ", ""), "DIRECTION", ""))) LIKE ?', ["%{$mainKeyword}%"])
+                            $existingDepartements = Departement::whereRaw('UPPER(TRIM(nom)) LIKE ?', [SqlSafe::likeContains($mainKeyword)])
+                                ->orWhereRaw('UPPER(TRIM(REPLACE(REPLACE(nom, "DIRECTION ", ""), "DIRECTION", ""))) LIKE ?', [SqlSafe::likeContains($mainKeyword)])
                                 ->get();
 
                             // Si on trouve un département existant avec le même mot-clé, l'utiliser

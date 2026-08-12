@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import ReportingRhOverview, {
+    type ReportingDashboard,
+} from '@/components/pointage/ReportingRhOverview.vue';
 import PointageLayout from '@/layouts/pointage/PointageLayout.vue';
 import type { BreadcrumbItem } from '@/types';
 import { Link, router } from '@inertiajs/vue3';
-import { Calendar, Download, Search } from 'lucide-vue-next';
+import { ArrowLeft, Calendar, Download, List, Search } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 
 type Row = {
@@ -53,22 +56,56 @@ const props = defineProps<{
         q: string;
         type: string;
         statut: string;
+        departement?: string;
+        mois?: string;
+        statut_presence?: string;
     };
     agences: { id: number; nom: string }[];
+    departements?: string[];
+    statut_types?: { value: string; label: string }[];
+    reporting_dashboard: ReportingDashboard;
+    mode?: 'overview' | 'lignes';
 }>();
 
-const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Pointage', href: '/pointage/rh/presence/recuperation-pointages' },
-    { title: 'Dashboard', href: '#' },
-];
-
+const pageMode = computed(() => props.mode ?? 'overview');
+const isOverview = computed(() => pageMode.value !== 'lignes');
+const departements = computed(() => props.departements ?? []);
+const statutTypes = computed(() => props.statut_types ?? [
+    { value: 'present', label: 'Présent' },
+    { value: 'retard', label: 'Retard' },
+    { value: 'absence', label: 'Absence' },
+    { value: 'conge_annuel', label: 'Congé annuel' },
+    { value: 'conge_maladie', label: 'Congé maladie' },
+    { value: 'permission_exceptionnelle', label: 'Permission exceptionnelle' },
+    { value: 'mission', label: 'Mission' },
+    { value: 'formation', label: 'Formation' },
+]);
 const searchQ = ref(props.filters.q);
+const dashboardDate = ref(props.filters.date_fin);
+const dashboardMois = ref(props.filters.mois ?? props.filters.date_fin.slice(0, 7));
+const dashboardAgence = ref(props.filters.agence_id ? String(props.filters.agence_id) : '');
+const dashboardDepartement = ref(props.filters.departement ?? '');
+const dashboardStatutPresence = ref(props.filters.statut_presence ?? '');
+
+const breadcrumbs = computed<BreadcrumbItem[]>(() => [
+    { title: 'Pointage', href: '/pointage/rh/presence/recuperation-pointages' },
+    isOverview.value
+        ? { title: 'Dashboard', href: '#' }
+        : { title: 'Dashboard', href: '/pointage/rh/presence/recuperation-pointages' },
+    ...(isOverview.value ? [] : [{ title: 'Détail des lignes', href: '#' }]),
+]);
 
 watch(
-    () => props.filters.q,
-    (v) => {
-        searchQ.value = v;
+    () => props.filters,
+    (f) => {
+        dashboardDate.value = f.date_fin;
+        dashboardMois.value = f.mois ?? f.date_fin.slice(0, 7);
+        dashboardAgence.value = f.agence_id ? String(f.agence_id) : '';
+        dashboardDepartement.value = f.departement ?? '';
+        dashboardStatutPresence.value = f.statut_presence ?? '';
+        searchQ.value = f.q;
     },
+    { deep: true },
 );
 
 const exportHref = computed(() => {
@@ -90,20 +127,89 @@ const exportHref = computed(() => {
     return `/pointage/rh/presence/recuperation-pointages/export?${p.toString()}`;
 });
 
-function reload(overrides: Partial<typeof props.filters> = {}) {
+function buildQuery(overrides: Partial<typeof props.filters> = {}, mode: 'overview' | 'lignes' = pageMode.value) {
     const f = { ...props.filters, ...overrides };
-    router.get(
-        '/pointage/rh/presence/recuperation-pointages',
+    const query: Record<string, string | number> = {
+        date_debut: f.date_debut,
+        date_fin: f.date_fin,
+        agence_id: f.agence_id ?? 'tous',
+        q: f.q ?? '',
+        type: f.type,
+        statut: f.statut,
+        mode,
+    };
+    if (f.departement) query.departement = f.departement;
+    if (f.mois) query.mois = f.mois;
+    if (f.statut_presence) query.statut_presence = f.statut_presence;
+    return query;
+}
+
+function applyDashboardFilters() {
+    const mois = dashboardMois.value || props.filters.date_fin.slice(0, 7);
+    let date = dashboardDate.value || props.filters.date_fin;
+
+    // Si le mois change sans date cohérente, caler la date sur fin de mois (ou aujourd’hui).
+    if (date.slice(0, 7) !== mois) {
+        const [y, m] = mois.split('-').map(Number);
+        const last = new Date(y, m, 0);
+        const today = new Date();
+        const end = last > today ? today : last;
+        date = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+    }
+
+    reload(
         {
-            date_debut: f.date_debut,
-            date_fin: f.date_fin,
-            agence_id: f.agence_id ?? 'tous',
-            q: f.q,
-            type: f.type,
-            statut: f.statut,
+            date_debut: `${mois}-01`,
+            date_fin: date,
+            mois,
+            agence_id: dashboardAgence.value ? Number(dashboardAgence.value) : null,
+            departement: dashboardDepartement.value || '',
+            statut_presence: dashboardStatutPresence.value || '',
         },
-        { preserveState: true, preserveScroll: true, replace: true },
+        'overview',
     );
+}
+
+function resetDashboardFilters() {
+    const today = new Date().toISOString().slice(0, 10);
+    dashboardDate.value = today;
+    dashboardMois.value = today.slice(0, 7);
+    dashboardAgence.value = '';
+    dashboardDepartement.value = '';
+    dashboardStatutPresence.value = '';
+    reload(
+        {
+            date_debut: today,
+            date_fin: today,
+            mois: today.slice(0, 7),
+            agence_id: null,
+            departement: '',
+            statut_presence: '',
+            q: '',
+            type: 'tous',
+            statut: 'tous',
+        },
+        'overview',
+    );
+}
+
+const detailHref = computed(() => {
+    const p = new URLSearchParams();
+    const q = buildQuery({}, 'lignes');
+    Object.entries(q).forEach(([k, v]) => {
+        if (v !== '' && v != null) p.set(k, String(v));
+    });
+    return `/pointage/rh/presence/recuperation-pointages?${p.toString()}`;
+});
+
+const overviewHref = '/pointage/rh/presence/recuperation-pointages';
+
+function reload(overrides: Partial<typeof props.filters> = {}, mode: 'overview' | 'lignes' = pageMode.value) {
+    router.get('/pointage/rh/presence/recuperation-pointages', buildQuery(overrides, mode), {
+        preserveState: false,
+        preserveScroll: mode === pageMode.value,
+        replace: true,
+    });
 }
 
 function onSearchSubmit() {
@@ -126,20 +232,132 @@ function typeBadgeClass(_type: string): string {
 </script>
 
 <template>
-    <PointageLayout title="Dashboard" :breadcrumbs="breadcrumbs">
+    <PointageLayout :title="isOverview ? 'Dashboard' : 'Détail des lignes de pointage'" :breadcrumbs="breadcrumbs">
         <div class="mx-auto max-w-[1400px] space-y-6">
-            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                    <h1 class="text-xl font-semibold text-[#0C447C]">Dashboard</h1>
-                    <p class="mt-1 text-sm text-[#888780]">{{ periode_label }}</p>
+            <!-- Vue Dashboard (synthèse) -->
+            <template v-if="isOverview">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <h1 class="text-xl font-semibold text-[#0C447C]">Dashboard</h1>
+                        <p class="mt-1 text-sm text-[#888780]">{{ reporting_dashboard.date_short }}</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <a
+                            :href="exportHref"
+                            class="inline-flex items-center justify-center gap-2 rounded-md border border-[#185FA5] bg-white px-4 py-2 text-sm font-semibold text-[#185FA5] shadow-sm hover:bg-[#E6F1FB]"
+                        >
+                            <Download class="h-4 w-4" aria-hidden="true" />
+                            Exporter les données
+                        </a>
+                        <Link
+                            :href="detailHref"
+                            class="inline-flex items-center justify-center gap-2 rounded-md border border-[#185FA5] bg-[#185FA5] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#144a84]"
+                        >
+                            <List class="h-4 w-4" aria-hidden="true" />
+                            Détail des lignes de pointage
+                        </Link>
+                    </div>
                 </div>
-                <div class="flex flex-wrap items-center gap-2">
-                    <Link
-                        href="/pointage/rh/tous-pointages"
-                        class="inline-flex items-center justify-center rounded-md border border-[#e2e0d8] bg-white px-4 py-2 text-sm font-medium text-[#0C447C] shadow-sm hover:bg-[#FAFAF8]"
-                    >
-                        Synthèse journalière
-                    </Link>
+
+                <div class="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <div class="flex flex-wrap items-end gap-2">
+                        <div class="min-w-[130px] flex-1">
+                            <label class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400" for="dash-mois">Mois</label>
+                            <input
+                                id="dash-mois"
+                                v-model="dashboardMois"
+                                type="month"
+                                class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800"
+                                @change="dashboardDate = dashboardMois + '-01'"
+                            />
+                        </div>
+                        <div class="min-w-[130px] flex-1">
+                            <label class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400" for="dash-date">Date</label>
+                            <input
+                                id="dash-date"
+                                v-model="dashboardDate"
+                                type="date"
+                                class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800"
+                                @change="dashboardMois = dashboardDate.slice(0, 7)"
+                            />
+                        </div>
+                        <div class="min-w-[130px] flex-1">
+                            <label class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400" for="dash-agence">Agence</label>
+                            <select
+                                id="dash-agence"
+                                v-model="dashboardAgence"
+                                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                            >
+                                <option value="">Toutes</option>
+                                <option v-for="a in agences" :key="'d-ag-' + a.id" :value="String(a.id)">{{ a.nom }}</option>
+                            </select>
+                        </div>
+                        <div class="min-w-[130px] flex-1">
+                            <label class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400" for="dash-dept">Département</label>
+                            <select
+                                id="dash-dept"
+                                v-model="dashboardDepartement"
+                                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                            >
+                                <option value="">Tous</option>
+                                <option v-for="d in departements" :key="'d-dp-' + d" :value="d">{{ d }}</option>
+                            </select>
+                        </div>
+                        <div class="min-w-[160px] flex-1">
+                            <label class="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400" for="dash-type">Type / demande</label>
+                            <select
+                                id="dash-type"
+                                v-model="dashboardStatutPresence"
+                                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                            >
+                                <option value="">Tous</option>
+                                <option v-for="t in statutTypes" :key="'d-st-' + t.value" :value="t.value">{{ t.label }}</option>
+                            </select>
+                        </div>
+                        <button
+                            type="button"
+                            class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                            @click="resetDashboardFilters"
+                        >
+                            Réinitialiser
+                        </button>
+                        <button
+                            type="button"
+                            class="rounded-lg bg-[#E11D48] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#BE123C]"
+                            @click="applyDashboardFilters"
+                        >
+                            Appliquer
+                        </button>
+                    </div>
+                </div>
+
+                <ReportingRhOverview
+                    :dashboard="reporting_dashboard"
+                    :full-layout="true"
+                    :detail-href="detailHref"
+                    :export-href="exportHref"
+                    synthese-href="/pointage/rh/tous-pointages"
+                    reporting-href="/pointage/rapport/reporting"
+                    absences-href="/pointage/demandes"
+                />
+            </template>
+
+            <!-- Vue Détail des lignes -->
+            <template v-else>
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div class="flex items-start gap-3">
+                        <Link
+                            :href="overviewHref"
+                            class="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-md border border-[#e2e0d8] bg-white text-[#0C447C] shadow-sm hover:bg-[#FAFAF8]"
+                            title="Retour au dashboard"
+                        >
+                            <ArrowLeft class="h-4 w-4" />
+                        </Link>
+                        <div>
+                            <h1 class="text-xl font-semibold text-[#0C447C]">Détail des lignes de pointage</h1>
+                            <p class="mt-1 text-sm text-[#888780]">{{ periode_label }}</p>
+                        </div>
+                    </div>
                     <a
                         :href="exportHref"
                         class="inline-flex items-center justify-center gap-2 rounded-md border border-[#185FA5] bg-white px-4 py-2 text-sm font-semibold text-[#185FA5] shadow-sm hover:bg-[#E6F1FB]"
@@ -148,214 +366,214 @@ function typeBadgeClass(_type: string): string {
                         Exporter CSV
                     </a>
                 </div>
-            </div>
 
-            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-                <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
-                    <div class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Lignes pointage</div>
-                    <div class="mt-2 text-2xl font-bold tabular-nums text-[#0C447C]">{{ kpis.total_lignes }}</div>
-                </div>
-                <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
-                    <div class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Employés</div>
-                    <div class="mt-2 text-2xl font-bold tabular-nums text-[#0C447C]">{{ kpis.employes }}</div>
-                </div>
-                <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
-                    <div class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Arrivées</div>
-                    <div class="mt-2 text-2xl font-bold tabular-nums text-[#0C447C]">{{ kpis.arrivees }}</div>
-                </div>
-                <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
-                    <div class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Départs</div>
-                    <div class="mt-2 text-2xl font-bold tabular-nums text-[#0C447C]">{{ kpis.departs }}</div>
-                </div>
-                <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
-                    <div class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Retards</div>
-                    <div class="mt-2 text-2xl font-bold tabular-nums text-[#DC2626]">{{ kpis.retards }}</div>
-                </div>
-                <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
-                    <div class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Férié auto</div>
-                    <div class="mt-2 text-2xl font-bold tabular-nums text-[#185FA5]">{{ kpis.ferie_auto }}</div>
-                </div>
-            </div>
-
-            <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
-                <div class="flex flex-col gap-4 xl:flex-row xl:flex-wrap xl:items-end">
-                    <div class="flex flex-wrap items-center gap-3">
-                        <div class="inline-flex items-center gap-2 rounded-md border border-[#e2e0d8] bg-[#FAFAF8] px-3 py-2 text-sm">
-                            <Calendar class="h-4 w-4 text-[#888780]" aria-hidden="true" />
-                            <label class="sr-only" for="date-debut">Du</label>
-                            <input
-                                id="date-debut"
-                                type="date"
-                                class="border-0 bg-transparent p-0 text-sm tabular-nums text-[#0C447C] focus:outline-none"
-                                :value="filters.date_debut"
-                                @change="reload({ date_debut: ($event.target as HTMLInputElement).value })"
-                            />
-                        </div>
-                        <span class="text-sm text-[#888780]">au</span>
-                        <div class="inline-flex items-center gap-2 rounded-md border border-[#e2e0d8] bg-[#FAFAF8] px-3 py-2 text-sm">
-                            <label class="sr-only" for="date-fin">Au</label>
-                            <input
-                                id="date-fin"
-                                type="date"
-                                class="border-0 bg-transparent p-0 text-sm tabular-nums text-[#0C447C] focus:outline-none"
-                                :value="filters.date_fin"
-                                @change="reload({ date_fin: ($event.target as HTMLInputElement).value })"
-                            />
-                        </div>
+                <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+                    <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Lignes pointage</div>
+                        <div class="mt-2 text-2xl font-bold tabular-nums text-[#0C447C]">{{ kpis.total_lignes }}</div>
                     </div>
+                    <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Employés</div>
+                        <div class="mt-2 text-2xl font-bold tabular-nums text-[#0C447C]">{{ kpis.employes }}</div>
+                    </div>
+                    <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Arrivées</div>
+                        <div class="mt-2 text-2xl font-bold tabular-nums text-[#0C447C]">{{ kpis.arrivees }}</div>
+                    </div>
+                    <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Départs</div>
+                        <div class="mt-2 text-2xl font-bold tabular-nums text-[#0C447C]">{{ kpis.departs }}</div>
+                    </div>
+                    <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Retards</div>
+                        <div class="mt-2 text-2xl font-bold tabular-nums text-[#DC2626]">{{ kpis.retards }}</div>
+                    </div>
+                    <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-[#888780]">Férié auto</div>
+                        <div class="mt-2 text-2xl font-bold tabular-nums text-[#185FA5]">{{ kpis.ferie_auto }}</div>
+                    </div>
+                </div>
 
-                    <form class="flex min-w-[200px] flex-1 items-center gap-2" @submit.prevent="onSearchSubmit">
-                        <div class="relative flex-1">
-                            <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#888780]" />
-                            <input
-                                v-model="searchQ"
-                                type="search"
-                                placeholder="Nom, matricule, e-mail…"
-                                class="w-full rounded-md border border-[#e2e0d8] py-2 pl-9 pr-3 text-sm text-[#0C447C]"
-                            />
+                <div class="rounded-[10px] border border-[#e2e0d8] bg-white p-4 shadow-sm">
+                    <div class="flex flex-col gap-4 xl:flex-row xl:flex-wrap xl:items-end">
+                        <div class="flex flex-wrap items-center gap-3">
+                            <div class="inline-flex items-center gap-2 rounded-md border border-[#e2e0d8] bg-[#FAFAF8] px-3 py-2 text-sm">
+                                <Calendar class="h-4 w-4 text-[#888780]" aria-hidden="true" />
+                                <label class="sr-only" for="date-debut">Du</label>
+                                <input
+                                    id="date-debut"
+                                    type="date"
+                                    class="border-0 bg-transparent p-0 text-sm tabular-nums text-[#0C447C] focus:outline-none"
+                                    :value="filters.date_debut"
+                                    @change="reload({ date_debut: ($event.target as HTMLInputElement).value })"
+                                />
+                            </div>
+                            <span class="text-sm text-[#888780]">au</span>
+                            <div class="inline-flex items-center gap-2 rounded-md border border-[#e2e0d8] bg-[#FAFAF8] px-3 py-2 text-sm">
+                                <label class="sr-only" for="date-fin">Au</label>
+                                <input
+                                    id="date-fin"
+                                    type="date"
+                                    class="border-0 bg-transparent p-0 text-sm tabular-nums text-[#0C447C] focus:outline-none"
+                                    :value="filters.date_fin"
+                                    @change="reload({ date_fin: ($event.target as HTMLInputElement).value })"
+                                />
+                            </div>
                         </div>
-                        <button
-                            type="submit"
-                            class="rounded-md bg-[#185FA5] px-4 py-2 text-sm font-semibold text-white hover:bg-[#144a84]"
-                        >
-                            Rechercher
-                        </button>
-                    </form>
 
-                    <select
-                        class="rounded-md border border-[#e2e0d8] bg-white px-3 py-2 text-sm text-[#0C447C]"
-                        :value="filters.agence_id ?? 'tous'"
-                        @change="
-                            reload({
-                                agence_id:
-                                    ($event.target as HTMLSelectElement).value === 'tous'
-                                        ? null
-                                        : Number(($event.target as HTMLSelectElement).value),
-                            })
-                        "
-                    >
-                        <option value="tous">Toutes les agences</option>
-                        <option v-for="a in agences" :key="'ag-' + a.id" :value="a.id">{{ a.nom }}</option>
-                    </select>
-
-                    <select
-                        class="rounded-md border border-[#e2e0d8] bg-white px-3 py-2 text-sm text-[#0C447C]"
-                        :value="filters.type"
-                        @change="reload({ type: ($event.target as HTMLSelectElement).value })"
-                    >
-                        <option value="tous">Tous types</option>
-                        <option value="arrivee">Arrivée</option>
-                        <option value="depart">Départ</option>
-                    </select>
-
-                    <select
-                        class="rounded-md border border-[#e2e0d8] bg-white px-3 py-2 text-sm text-[#0C447C]"
-                        :value="filters.statut"
-                        @change="reload({ statut: ($event.target as HTMLSelectElement).value })"
-                    >
-                        <option value="tous">Tous statuts</option>
-                        <option value="normal">Normal</option>
-                        <option value="retard">Retard</option>
-                        <option value="ferie_auto">Férié (auto)</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="overflow-hidden rounded-[10px] border border-[#e2e0d8] bg-white shadow-sm">
-                <div class="overflow-x-auto">
-                    <table class="w-full min-w-[1200px] text-sm">
-                        <thead class="border-b border-[#e2e0d8] bg-[#FAFAF8] text-left text-[10px] font-bold uppercase tracking-wide text-[#888780]">
-                            <tr>
-                                <th class="px-3 py-3">Date</th>
-                                <th class="px-3 py-3">Employé</th>
-                                <th class="px-3 py-3">Matricule</th>
-                                <th class="px-3 py-3">Service</th>
-                                <th class="px-3 py-3">Agence</th>
-                                <th class="px-3 py-3">Type</th>
-                                <th class="px-3 py-3">H.A. effective</th>
-                                <th class="px-3 py-3">H.A. réelle</th>
-                                <th class="px-3 py-3">H.D. effective</th>
-                                <th class="px-3 py-3">H.D. réelle</th>
-                                <th class="px-3 py-3">Total H.eff.</th>
-                                <th class="px-3 py-3">Total H.réelle</th>
-                                <th class="px-3 py-3">Statut</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr
-                                v-for="p in pointages.data"
-                                :key="`${p.user_id}-${p.date}`"
-                                class="border-b border-[#F1EFE8] last:border-0 hover:bg-[#FAFAF8]/80"
+                        <form class="flex min-w-[200px] flex-1 items-center gap-2" @submit.prevent="onSearchSubmit">
+                            <div class="relative flex-1">
+                                <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#888780]" />
+                                <input
+                                    v-model="searchQ"
+                                    type="search"
+                                    placeholder="Nom, matricule, e-mail…"
+                                    class="w-full rounded-md border border-[#e2e0d8] py-2 pl-9 pr-3 text-sm text-[#0C447C]"
+                                />
+                            </div>
+                            <button
+                                type="submit"
+                                class="rounded-md bg-[#185FA5] px-4 py-2 text-sm font-semibold text-white hover:bg-[#144a84]"
                             >
-                                <td class="px-3 py-2.5 tabular-nums text-[#0C447C]">{{ p.date }}</td>
-                                <td class="px-3 py-2.5">
-                                    <div class="font-semibold text-[#0C447C]">{{ p.employe }}</div>
-                                    <div class="text-xs text-[#888780]">{{ p.email }}</div>
-                                    <div v-if="p.auto_ferie && p.ferie_libelle" class="mt-0.5 text-[10px] text-[#185FA5]">
-                                        {{ p.ferie_libelle }}
-                                    </div>
-                                </td>
-                                <td class="px-3 py-2.5 font-mono text-xs">{{ p.matricule }}</td>
-                                <td class="px-3 py-2.5 text-[#0C447C]">{{ p.service }}</td>
-                                <td class="px-3 py-2.5 text-[#0C447C]">{{ p.agence }}</td>
-                                <td class="px-3 py-2.5">
-                                    <span
-                                        class="inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold"
-                                        :class="typeBadgeClass(p.type)"
-                                    >
-                                        {{ p.type_label }}
-                                    </span>
-                                </td>
-                                <td class="px-3 py-2.5 tabular-nums font-medium text-[#0C447C]">{{ p.ha_effective }}</td>
-                                <td class="px-3 py-2.5 tabular-nums text-[#888780]">{{ p.ha_reelle }}</td>
-                                <td class="px-3 py-2.5 tabular-nums font-medium text-[#0C447C]">{{ p.hd_effective }}</td>
-                                <td class="px-3 py-2.5 tabular-nums text-[#888780]">{{ p.hd_reelle }}</td>
-                                <td class="px-3 py-2.5 tabular-nums font-semibold text-[#0C447C]">{{ p.total_effective }}</td>
-                                <td class="px-3 py-2.5 tabular-nums text-[#888780]">{{ p.total_reelle }}</td>
-                                <td class="px-3 py-2.5">
-                                    <span
-                                        class="inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold"
-                                        :class="statutBadgeClass(p.statut)"
-                                    >
-                                        {{ p.statut_label }}
-                                    </span>
-                                </td>
-                            </tr>
-                            <tr v-if="!pointages.data?.length">
-                                <td colspan="13" class="px-4 py-12 text-center text-[#888780]">
-                                    Aucun pointage pour cette période et ces filtres.
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                                Rechercher
+                            </button>
+                        </form>
 
-                <div
-                    v-if="(pointages.meta?.last_page ?? pointages.last_page ?? 1) > 1 && pointages.links?.length"
-                    class="flex flex-wrap justify-center gap-1 border-t border-[#e2e0d8] px-4 py-3"
-                >
-                    <template v-for="(link, i) in pointages.links ?? []" :key="i">
-                        <Link
-                            v-if="link.url"
-                            :href="link.url"
-                            preserve-scroll
-                            class="min-w-[2.25rem] rounded-md px-2 py-1 text-center text-xs"
-                            :class="
-                                link.active
-                                    ? 'bg-[#185FA5] font-semibold text-white'
-                                    : 'border border-[#e2e0d8] text-[#0C447C] hover:bg-[#FAFAF8]'
+                        <select
+                            class="rounded-md border border-[#e2e0d8] bg-white px-3 py-2 text-sm text-[#0C447C]"
+                            :value="filters.agence_id ?? 'tous'"
+                            @change="
+                                reload({
+                                    agence_id:
+                                        ($event.target as HTMLSelectElement).value === 'tous'
+                                            ? null
+                                            : Number(($event.target as HTMLSelectElement).value),
+                                })
                             "
                         >
-                            <span v-html="link.label" />
-                        </Link>
-                        <span
-                            v-else
-                            class="min-w-[2.25rem] cursor-not-allowed rounded-md px-2 py-1 text-center text-xs text-[#ccc]"
-                            v-html="link.label"
-                        />
-                    </template>
+                            <option value="tous">Toutes les agences</option>
+                            <option v-for="a in agences" :key="'ag-' + a.id" :value="a.id">{{ a.nom }}</option>
+                        </select>
+
+                        <select
+                            class="rounded-md border border-[#e2e0d8] bg-white px-3 py-2 text-sm text-[#0C447C]"
+                            :value="filters.type"
+                            @change="reload({ type: ($event.target as HTMLSelectElement).value })"
+                        >
+                            <option value="tous">Tous types</option>
+                            <option value="arrivee">Arrivée</option>
+                            <option value="depart">Départ</option>
+                        </select>
+
+                        <select
+                            class="rounded-md border border-[#e2e0d8] bg-white px-3 py-2 text-sm text-[#0C447C]"
+                            :value="filters.statut"
+                            @change="reload({ statut: ($event.target as HTMLSelectElement).value })"
+                        >
+                            <option value="tous">Tous statuts</option>
+                            <option value="normal">Normal</option>
+                            <option value="retard">Retard</option>
+                            <option value="ferie_auto">Férié (auto)</option>
+                        </select>
+                    </div>
                 </div>
-            </div>
+
+                <div class="overflow-hidden rounded-[10px] border border-[#e2e0d8] bg-white shadow-sm">
+                    <div class="overflow-x-auto">
+                        <table class="w-full min-w-[1200px] text-sm">
+                            <thead class="border-b border-[#e2e0d8] bg-[#FAFAF8] text-left text-[10px] font-bold uppercase tracking-wide text-[#888780]">
+                                <tr>
+                                    <th class="px-3 py-3">Date</th>
+                                    <th class="px-3 py-3">Employé</th>
+                                    <th class="px-3 py-3">Matricule</th>
+                                    <th class="px-3 py-3">Service</th>
+                                    <th class="px-3 py-3">Agence</th>
+                                    <th class="px-3 py-3">Type</th>
+                                    <th class="px-3 py-3">H.A. effective</th>
+                                    <th class="px-3 py-3">H.A. réelle</th>
+                                    <th class="px-3 py-3">H.D. effective</th>
+                                    <th class="px-3 py-3">H.D. réelle</th>
+                                    <th class="px-3 py-3">Total H.eff.</th>
+                                    <th class="px-3 py-3">Total H.réelle</th>
+                                    <th class="px-3 py-3">Statut</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr
+                                    v-for="p in pointages.data"
+                                    :key="`${p.user_id}-${p.date}`"
+                                    class="border-b border-[#F1EFE8] last:border-0 hover:bg-[#FAFAF8]/80"
+                                >
+                                    <td class="px-3 py-2.5 tabular-nums text-[#0C447C]">{{ p.date }}</td>
+                                    <td class="px-3 py-2.5">
+                                        <div class="font-semibold text-[#0C447C]">{{ p.employe }}</div>
+                                        <div class="text-xs text-[#888780]">{{ p.email }}</div>
+                                        <div v-if="p.auto_ferie && p.ferie_libelle" class="mt-0.5 text-[10px] text-[#185FA5]">
+                                            {{ p.ferie_libelle }}
+                                        </div>
+                                    </td>
+                                    <td class="px-3 py-2.5 font-mono text-xs">{{ p.matricule }}</td>
+                                    <td class="px-3 py-2.5 text-[#0C447C]">{{ p.service }}</td>
+                                    <td class="px-3 py-2.5 text-[#0C447C]">{{ p.agence }}</td>
+                                    <td class="px-3 py-2.5">
+                                        <span
+                                            class="inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold"
+                                            :class="typeBadgeClass(p.type)"
+                                        >
+                                            {{ p.type_label }}
+                                        </span>
+                                    </td>
+                                    <td class="px-3 py-2.5 tabular-nums font-medium text-[#0C447C]">{{ p.ha_effective }}</td>
+                                    <td class="px-3 py-2.5 tabular-nums text-[#888780]">{{ p.ha_reelle }}</td>
+                                    <td class="px-3 py-2.5 tabular-nums font-medium text-[#0C447C]">{{ p.hd_effective }}</td>
+                                    <td class="px-3 py-2.5 tabular-nums text-[#888780]">{{ p.hd_reelle }}</td>
+                                    <td class="px-3 py-2.5 tabular-nums font-semibold text-[#0C447C]">{{ p.total_effective }}</td>
+                                    <td class="px-3 py-2.5 tabular-nums text-[#888780]">{{ p.total_reelle }}</td>
+                                    <td class="px-3 py-2.5">
+                                        <span
+                                            class="inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold"
+                                            :class="statutBadgeClass(p.statut)"
+                                        >
+                                            {{ p.statut_label }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr v-if="!pointages.data?.length">
+                                    <td colspan="13" class="px-4 py-12 text-center text-[#888780]">
+                                        Aucun pointage pour cette période et ces filtres.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div
+                        v-if="(pointages.meta?.last_page ?? pointages.last_page ?? 1) > 1 && pointages.links?.length"
+                        class="flex flex-wrap justify-center gap-1 border-t border-[#e2e0d8] px-4 py-3"
+                    >
+                        <template v-for="(link, i) in pointages.links ?? []" :key="i">
+                            <Link
+                                v-if="link.url"
+                                :href="link.url"
+                                preserve-scroll
+                                class="min-w-[2.25rem] rounded-md px-2 py-1 text-center text-xs"
+                                :class="
+                                    link.active
+                                        ? 'bg-[#185FA5] font-semibold text-white'
+                                        : 'border border-[#e2e0d8] text-[#0C447C] hover:bg-[#FAFAF8]'
+                                "
+                            >
+                                <span v-html="link.label" />
+                            </Link>
+                            <span
+                                v-else
+                                class="min-w-[2.25rem] cursor-not-allowed rounded-md px-2 py-1 text-center text-xs text-[#ccc]"
+                                v-html="link.label"
+                            />
+                        </template>
+                    </div>
+                </div>
+            </template>
         </div>
     </PointageLayout>
 </template>

@@ -11,6 +11,7 @@ use App\Support\PointageDeclarationTypes;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 
@@ -106,6 +107,7 @@ class PointageDeclarationController extends Controller
         ]);
 
         PointageAuditLog::record($user, 'DECLARATION_SOUMISE', 'Nouvelle déclaration pointage', null, $request->ip(), 'ok');
+        Cache::forget('pointage.rh.pending_declarations');
 
         $msg = $statut === 'en_attente_manager'
             ? 'Déclaration envoyée à votre N+1 pour validation.'
@@ -374,6 +376,8 @@ class PointageDeclarationController extends Controller
             PointageAuditLog::record($user, 'DECLARATION_VAL_MANAGER_KO', 'Rejet manager', null, $request->ip(), 'alerte', ['declaration_id' => $declaration->id]);
         }
 
+        Cache::forget('pointage.rh.pending_declarations');
+
         return back()->with('success', 'Décision enregistrée.');
     }
 
@@ -457,6 +461,8 @@ class PointageDeclarationController extends Controller
 
             return back()->with('error', 'La validation a échoué : '.$e->getMessage());
         }
+
+        Cache::forget('pointage.rh.pending_declarations');
 
         return back()->with('success', 'Décision RH enregistrée.');
     }

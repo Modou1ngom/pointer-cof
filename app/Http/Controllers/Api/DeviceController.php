@@ -14,31 +14,28 @@ class DeviceController extends Controller
 {
     public function store(RegisterDeviceRequest $request): JsonResponse
     {
-        $validated = $request->validated();
-
-        $user = $this->optionalUserFromBearer($request->bearerToken());
-        if ($user instanceof User) {
-            MobileDeviceRegistration::register($user, $validated);
-            $user->profilCollaborateurAssocie();
-
-            return response()->json([
-                'message' => 'Appareil enregistré',
-                'user' => MobileApiAccountResource::toArray($user, $request),
-            ], 200);
+        if (! (bool) config('pointrust.device_register_enabled', true)) {
+            return response()->json(['message' => 'Non disponible'], 404);
         }
 
-        return response()->json(['message' => 'Appareil enregistré'], 200);
-    }
+        $pat = PersonalAccessToken::findToken((string) $request->bearerToken());
+        $user = $pat?->tokenable;
 
-    private function optionalUserFromBearer(?string $bearer): ?User
-    {
-        if ($bearer === null || $bearer === '') {
-            return null;
+        if (! $user instanceof User || ! $user->is_active) {
+            return response()->json(['message' => 'Non authentifié'], 401);
         }
 
-        $pat = PersonalAccessToken::findToken($bearer);
-        $model = $pat?->tokenable;
+        $abilities = $pat->abilities ?? [];
+        if (in_array('otp-pending', $abilities, true) && ! in_array('*', $abilities, true)) {
+            return response()->json(['message' => 'OTP requis'], 403);
+        }
 
-        return $model instanceof User ? $model : null;
+        MobileDeviceRegistration::register($user, $request->validated());
+        $user->profilCollaborateurAssocie();
+
+        return response()->json([
+            'message' => 'Appareil enregistré',
+            'user' => MobileApiAccountResource::toArray($user, $request),
+        ], 200);
     }
 }

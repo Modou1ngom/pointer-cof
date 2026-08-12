@@ -42,6 +42,9 @@ class User extends Authenticatable
         'remember_token',
     ];
 
+    /** @var array<string, true>|null */
+    private ?array $cachedRoleSlugSet = null;
+
     /**
      * Get the attributes that should be cast.
      *
@@ -172,17 +175,7 @@ class User extends Authenticatable
      */
     public function hasRole(string $roleSlug): bool
     {
-        // Vérifier les rôles de l'utilisateur
-        if ($this->roles()->where('slug', $roleSlug)->exists()) {
-            return true;
-        }
-
-        // Vérifier les rôles du profil si disponible
-        if ($this->profil) {
-            return $this->profil->roles()->where('slug', $roleSlug)->exists();
-        }
-
-        return false;
+        return $this->roleSlugSet()[$roleSlug] ?? false;
     }
 
     /**
@@ -191,17 +184,40 @@ class User extends Authenticatable
      */
     public function hasAnyRole(array $roleSlugs): bool
     {
-        // Vérifier les rôles de l'utilisateur
-        if ($this->roles()->whereIn('slug', $roleSlugs)->exists()) {
-            return true;
-        }
-
-        // Vérifier les rôles du profil si disponible
-        if ($this->profil) {
-            return $this->profil->roles()->whereIn('slug', $roleSlugs)->exists();
+        $set = $this->roleSlugSet();
+        foreach ($roleSlugs as $slug) {
+            if ($set[$slug] ?? false) {
+                return true;
+            }
         }
 
         return false;
+    }
+
+    /**
+     * @return array<string, true>
+     */
+    private function roleSlugSet(): array
+    {
+        if (isset($this->cachedRoleSlugSet)) {
+            return $this->cachedRoleSlugSet;
+        }
+
+        if ($this->relationLoaded('roles') === false) {
+            $this->load('roles');
+        }
+
+        $slugs = $this->roles->pluck('slug')->filter()->all();
+
+        $this->profilCollaborateurAssocie();
+        if ($this->profil) {
+            if ($this->profil->relationLoaded('roles') === false) {
+                $this->profil->load('roles');
+            }
+            $slugs = array_merge($slugs, $this->profil->roles->pluck('slug')->filter()->all());
+        }
+
+        return $this->cachedRoleSlugSet = array_fill_keys(array_values(array_unique($slugs)), true);
     }
 
     /**

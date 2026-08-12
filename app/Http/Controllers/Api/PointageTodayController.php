@@ -33,6 +33,9 @@ class PointageTodayController extends Controller
         $departAt = null;
         $isLate = false;
         $source = null;
+        $arr = null;
+        $dep = null;
+        $autoFerieOnly = false;
 
         $pointages = Pointage::query()
             ->where('user_id', $user->id)
@@ -40,8 +43,13 @@ class PointageTodayController extends Controller
             ->orderBy('clocked_at')
             ->get();
 
-        $arr = $pointages->where('type', 'arrivee')->sortBy('clocked_at')->first();
-        $dep = $pointages->where('type', 'depart')->sortByDesc('clocked_at')->first();
+        $realPointages = $pointages->filter(fn (Pointage $p) => ! $p->isSynthetic())->values();
+        $syntheticPointages = $pointages->filter(fn (Pointage $p) => $p->isSynthetic())->values();
+        $autoFerieOnly = $realPointages->isEmpty() && $syntheticPointages->isNotEmpty();
+
+        // Le mobile n’affiche que les pointages réels (scan / biométrie), pas les synthétiques.
+        $arr = $realPointages->where('type', 'arrivee')->sortBy('clocked_at')->first();
+        $dep = $realPointages->where('type', 'depart')->sortByDesc('clocked_at')->first();
 
         if ($arr !== null) {
             $arriveeAt = $arr->clocked_at;
@@ -58,7 +66,13 @@ class PointageTodayController extends Controller
                 ->where('user_id', $user->id)
                 ->whereBetween('recorded_at', [$start, $end])
                 ->orderBy('recorded_at')
-                ->get();
+                ->get()
+                ->filter(function (Attendance $a) {
+                    $payload = (string) ($a->qr_payload ?? '');
+
+                    // Exclure les lignes créées par déclaration RH (heures fictives 08:00/17:00).
+                    return ! str_starts_with($payload, 'declaration:');
+                });
 
             if ($arriveeAt === null) {
                 $checkin = $attendances->whereIn('type', ['checkin', 'arrivee'])->sortBy('recorded_at')->first();
@@ -84,6 +98,8 @@ class PointageTodayController extends Controller
             $status = 'present';
         } elseif ($checkInIso !== null) {
             $status = 'partial';
+        } elseif ($autoFerieOnly) {
+            $status = 'ferie_auto';
         }
 
         $heureArrivee = (string) config('pointage.heure_arrivee', '08:00');
@@ -122,13 +138,20 @@ class PointageTodayController extends Controller
             'entry' => $arr !== null ? $arr->heureAffichee() : ($arriveeAt?->format('H:i')),
             'exit' => $dep !== null ? $dep->heureAffichee() : ($departAt?->format('H:i')),
             'status' => $status,
-            'statut' => $this->statutLabel($status, $isLate),
+            'statut' => $this->statutLabel($status, $isLate, $autoFerieOnly),
             'is_late' => $isLate,
             'isLate' => $isLate,
+            'auto_ferie' => $autoFerieOnly,
+            'autoFerie' => $autoFerieOnly,
             'journee_complete' => $journeeComplete,
             'journeeComplete' => $journeeComplete,
             'synced' => true,
             'office_zone' => MobileApiGeolocation::officeZoneForUser($user),
+            // Toujours exposer les horaires prévus (section « Mes horaires » mobile).
+            'scheduled_arrival' => $heureArrivee,
+            'scheduled_departure' => $heureDepart,
+            'heure_arrivee_prevue' => $heureArrivee,
+            'heure_depart_prevue' => $heureDepart,
         ];
 
         if (! $lite) {
@@ -148,10 +171,6 @@ class PointageTodayController extends Controller
                 'total_ajust_journee' => $journeeComplete ? $ficheRow['total_ajust_journee'] : null,
                 'totalAjust' => $journeeComplete ? $ficheRow['total_ajust_calc'] : null,
                 'totalAjustJournee' => $journeeComplete ? $ficheRow['total_ajust_journee'] : null,
-                'scheduled_arrival' => $heureArrivee,
-                'scheduled_departure' => $heureDepart,
-                'heure_arrivee_prevue' => $heureArrivee,
-                'heure_depart_prevue' => $heureDepart,
                 'source' => $source,
                 'geolocation' => MobileApiGeolocation::clientHints(),
                 'plages_pointage' => app(PointageHorairesAjustementService::class)->plagesConfigForApi(),
@@ -164,8 +183,11 @@ class PointageTodayController extends Controller
         ]));
     }
 
-    private function statutLabel(string $status, bool $isLate): string
+    private function statutLabel(string $status, bool $isLate, bool $autoFerieOnly): string
     {
+        if ($autoFerieOnly || $status === 'ferie_auto') {
+            return 'Jour férié (auto)';
+        }
         if ($status === 'pending') {
             return 'En attente de pointage';
         }

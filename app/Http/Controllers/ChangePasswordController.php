@@ -35,6 +35,8 @@ class ChangePasswordController extends Controller
             'password' => $validated['password'],
             'must_change_password' => false,
         ]);
+        $user->tokens()->delete();
+        $request->session()->regenerate();
 
         return redirect()->route('dashboard')
             ->with('status', 'Votre mot de passe a été modifié avec succès.');

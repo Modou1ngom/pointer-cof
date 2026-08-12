@@ -177,10 +177,14 @@ class PointageOtpService
         $driver = config('pointage.otp_sms_driver', 'log');
 
         if ($driver === 'log' || ! config('pointage.otp_sms_enabled', true)) {
-            Log::info('[Pointage OTP SMS — simulation / log]', [
-                'to' => $telephoneE164OrLocal,
-                'message' => $body,
-            ]);
+            $payload = ['to' => $telephoneE164OrLocal];
+            // Jamais le code OTP en clair hors environnement local.
+            if (app()->environment('local')) {
+                $payload['message'] = $body;
+            } else {
+                $payload['message'] = '[redacted]';
+            }
+            Log::info('[Pointage OTP SMS — simulation / log]', $payload);
 
             return;
         }

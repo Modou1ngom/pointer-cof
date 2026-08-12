@@ -7,8 +7,12 @@ use App\Models\Departement;
 use App\Models\Filiale;
 use App\Models\PointageAffectation;
 use App\Models\PointageAffectationHistory;
+use App\Models\PointageAuditLog;
+use App\Models\PointageDeclaration;
 use App\Models\Profil;
 use App\Models\User;
+use App\Services\Pointage\PointageDeclarationPresenceService;
+use App\Support\PointageDeclarationTypes;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -18,6 +22,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rules\Password;
 
 class PointageRhAffectationController extends Controller
 {
@@ -99,7 +104,7 @@ class PointageRhAffectationController extends Controller
                 'type_contrat' => 'nullable|in:CDI,CDD,Stagiaire,Autre',
                 'statut' => 'nullable|in:actif,inactif',
                 'n_plus_1_id' => 'nullable|exists:profiles,id',
-                'password' => 'required|string|min:8|confirmed',
+                'password' => ['required', 'string', Password::defaults(), 'confirmed'],
                 'must_change_password' => 'nullable|boolean',
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -354,6 +359,59 @@ class PointageRhAffectationController extends Controller
         }
 
         return back()->with('success', $affectation->statut_activation ? 'Affectation activée.' : 'Affectation désactivée.');
+    }
+
+    public function declarerConge(Request $request, PointageAffectation $affectation): RedirectResponse
+    {
+        $actor = $this->actor();
+        $affectation->syncUserLinkFromProfilEmail();
+        if (! $affectation->user_id) {
+            return back()->with('error', 'Cet employé n’a pas de compte utilisateur : impossible de déclarer un congé.');
+        }
+        $this->ensureCanManageUser($actor, $affectation->user);
+
+        $type = PointageDeclarationTypes::normalize((string) $request->input('type', 'conge_annuel'));
+        if (! in_array($type, ['conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'mission'], true)) {
+            $type = 'conge_annuel';
+        }
+        $request->merge(['type' => $type]);
+        $validated = $request->validate(PointageDeclarationTypes::storeRules($type));
+
+        $declaration = PointageDeclaration::create([
+            'user_id' => $affectation->user_id,
+            'type' => $type,
+            'date_concernee' => $validated['date_concernee'],
+            'date_fin' => $validated['date_fin'] ?? $validated['date_concernee'],
+            'heure_debut' => $validated['heure_debut'] ?? null,
+            'heure_fin' => $validated['heure_fin'] ?? null,
+            'lieu' => $validated['lieu'] ?? null,
+            'motif' => $validated['motif'],
+            'commentaire' => $validated['commentaire'] ?? null,
+            'statut' => 'valide',
+            'rh_user_id' => $actor->id,
+            'rh_decided_at' => now(),
+            'rh_comment' => 'Déclaré par RH depuis l’affectation.',
+        ]);
+
+        app(PointageDeclarationPresenceService::class)->appliquerApresValidationRh($declaration);
+
+        $this->logHistory($affectation->user_id, $actor->id, 'declaration_conge', [
+            'declaration_id' => $declaration->id,
+            'type' => $type,
+            'date_concernee' => $validated['date_concernee'],
+            'date_fin' => $validated['date_fin'] ?? $validated['date_concernee'],
+        ]);
+        PointageAuditLog::record(
+            $actor,
+            'DECLARATION_CONGE_RH',
+            'Congé déclaré par RH pour '.$affectation->user->name,
+            null,
+            $request->ip(),
+            'ok',
+            ['declaration_id' => $declaration->id, 'user_id' => $affectation->user_id]
+        );
+
+        return back()->with('success', PointageDeclarationTypes::label($type).' enregistré : l’employé n’est plus compté en absence sur cette période.');
     }
 
     public function saveParametrage(Request $request, PointageAffectation $affectation): JsonResponse

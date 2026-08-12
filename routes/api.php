@@ -21,9 +21,9 @@ use Illuminate\Support\Facades\Route;
 |--------------------------------------------------------------------------
 */
 
-Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:20,1');
-Route::post('/verify-otp', [AuthController::class, 'verifyOtp'])->middleware('throttle:20,1');
-Route::post('/register-device', [DeviceController::class, 'store'])->middleware('throttle:60,1');
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
+Route::post('/verify-otp', [AuthController::class, 'verifyOtp'])->middleware('throttle:5,1');
+Route::post('/register-device', [DeviceController::class, 'store'])->middleware('throttle:10,1');
 
 Route::middleware(['auth:sanctum', 'reject_otp_pending'])->group(function () {
     Route::post('/attendance/scan', [AttendanceScanController::class, 'validateScan'])->middleware('throttle:120,1');

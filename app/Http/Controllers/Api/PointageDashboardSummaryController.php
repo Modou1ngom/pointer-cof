@@ -73,16 +73,26 @@ class PointageDashboardSummaryController extends Controller
             /** @var \Illuminate\Support\Collection<int, Attendance> $atts */
             $atts = $attendances->get($day) ?? collect();
 
-            $arrivee = $items->firstWhere('type', 'arrivee');
+            $arrivee = $items->first(fn (Pointage $p) => $p->type === 'arrivee' && ! $p->isSynthetic());
             $depart = $items
-                ->filter(fn (Pointage $p) => $p->type === 'depart')
+                ->filter(fn (Pointage $p) => $p->type === 'depart' && ! $p->isSynthetic())
                 ->sortByDesc(fn (Pointage $p) => $p->clocked_at->timestamp)
                 ->first();
 
+            $hasSyntheticOnly = $arrivee === null
+                && $depart === null
+                && $items->contains(fn (Pointage $p) => $p->isSynthetic());
+
+            $attsReal = $atts->filter(function (Attendance $a) {
+                $payload = (string) ($a->qr_payload ?? '');
+
+                return ! str_starts_with($payload, 'declaration:');
+            });
+
             $hasCheckin = $arrivee !== null
-                || $atts->contains(fn (Attendance $a) => in_array($a->type, ['checkin', 'arrivee'], true));
+                || $attsReal->contains(fn (Attendance $a) => in_array($a->type, ['checkin', 'arrivee'], true));
             $hasCheckout = $depart !== null
-                || $atts->contains(fn (Attendance $a) => in_array($a->type, ['checkout', 'depart'], true));
+                || $attsReal->contains(fn (Attendance $a) => in_array($a->type, ['checkout', 'depart'], true));
 
             if ($hasCheckin || $hasCheckout) {
                 $presents++;
@@ -94,7 +104,7 @@ class PointageDashboardSummaryController extends Controller
             }
 
             $kind = $coverage[$day] ?? null;
-            if (in_array($kind, ['conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'formation', 'mission'], true)) {
+            if ($hasSyntheticOnly || in_array($kind, ['conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'formation', 'mission'], true)) {
                 $conges++;
             } elseif (isset($calendrierSet[$day])) {
                 $absents++;

@@ -8,10 +8,12 @@ use App\Http\Requests\Api\VerifyOtpRequest;
 use App\Models\Otp;
 use App\Models\User;
 use App\Services\PointageOtpService;
+use App\Support\LoginAttemptGuard;
 use App\Support\MobileApiUserResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
@@ -24,17 +26,30 @@ class AuthController extends Controller
         $validated = $request->validated();
         $email = mb_strtolower(trim($validated['email']));
 
+        try {
+            LoginAttemptGuard::ensureNotLocked($email, $request->ip());
+        } catch (ValidationException $e) {
+            $msg = collect($e->errors())->flatten()->first() ?: 'Trop de tentatives.';
+
+            return response()->json(['message' => $msg], 429);
+        }
+
         $user = User::query()
             ->whereRaw('LOWER(TRIM(email)) = ?', [$email])
             ->first();
 
-        if (! $user || ! Hash::check($validated['password'], $user->password)) {
+        $passwordOk = Hash::check(
+            $validated['password'],
+            $user?->password ?? '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
+        );
+
+        if (! $user || ! $passwordOk || ! $user->is_active) {
+            LoginAttemptGuard::hit($email, $request->ip());
+
             return response()->json(['message' => 'Identifiants incorrects'], 401);
         }
 
-        if (! $user->is_active) {
-            return response()->json(['message' => 'Compte désactivé'], 403);
-        }
+        LoginAttemptGuard::clear($email, $request->ip());
 
         $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
 
@@ -50,13 +65,16 @@ class AuthController extends Controller
         if (! $mailResult['ok']) {
             Log::warning('POINTRUST API login : OTP non envoyé par e-mail', [
                 'user_id' => $user->id,
-                'email' => $user->email,
                 'message' => $mailResult['message'] ?? null,
             ]);
         }
 
         $user->tokens()->delete();
-        $plainToken = $user->createToken($validated['device_name'], ['otp-pending'])->plainTextToken;
+        $plainToken = $user->createToken(
+            $validated['device_name'],
+            ['otp-pending'],
+            now()->addMinutes(10),
+        )->plainTextToken;
 
         $response = [
             'token' => $plainToken,
@@ -64,21 +82,17 @@ class AuthController extends Controller
             'requiresOtp' => true,
             'message' => $mailResult['ok']
                 ? ($mailResult['via_log_fallback']
-                    ? 'Code OTP enregistré (e-mail journalisé dans storage/logs — configurez SMTP ou Mailtrap).'
+                    ? 'Code OTP généré (envoi e-mail en mode journal — configurez SMTP).'
                     : 'Code OTP envoyé')
-                : 'Code OTP généré (échec envoi e-mail — voir les logs serveur ou debug_otp en local).',
+                : 'Code OTP généré (échec envoi e-mail).',
         ];
 
-        if ($mailResult['via_log_fallback'] ?? false) {
+        if (($mailResult['via_log_fallback'] ?? false) && app()->environment('local')) {
             $response['otp_delivery'] = 'log';
         }
 
-        if (config('pointrust.debug_otp_in_login_response')) {
+        if ($this->mayExposeDebugOtp()) {
             $response['debug_otp'] = $code;
-            Log::info('POINTRUST API login — code OTP (dev uniquement)', [
-                'email' => $email,
-                'debug_otp' => $code,
-            ]);
         }
 
         return response()->json($response);
@@ -92,6 +106,14 @@ class AuthController extends Controller
             ? mb_strtolower($rawIdentifier)
             : $rawIdentifier;
 
+        try {
+            LoginAttemptGuard::ensureNotLocked('otp:'.$identifierKey, $request->ip());
+        } catch (ValidationException $e) {
+            $msg = collect($e->errors())->flatten()->first() ?: 'Trop de tentatives.';
+
+            return response()->json(['message' => $msg], 429);
+        }
+
         $otp = Otp::query()
             ->where('identifier', $identifierKey)
             ->whereNull('used_at')
@@ -100,10 +122,13 @@ class AuthController extends Controller
             ->first();
 
         if ($otp === null || ! $otp->matchesPlainCode($validated['code'])) {
+            LoginAttemptGuard::hit('otp:'.$identifierKey, $request->ip());
+
             return response()->json(['message' => 'Code invalide ou expiré'], 422);
         }
 
         $otp->forceFill(['used_at' => now()])->save();
+        LoginAttemptGuard::clear('otp:'.$identifierKey, $request->ip());
 
         $user = str_contains($identifierKey, '@')
             ? User::query()->whereRaw('LOWER(TRIM(email)) = ?', [$identifierKey])->first()
@@ -114,14 +139,27 @@ class AuthController extends Controller
         }
 
         $user->tokens()->delete();
-        $plain = $user->createToken('mobile', ['*'])->plainTextToken;
+        $ttl = max(30, (int) config('security.api_token_ttl_minutes', 720));
+        $plain = $user->createToken(
+            'mobile',
+            ['*'],
+            now()->addMinutes($ttl),
+        )->plainTextToken;
 
         return response()->json([
             'access_token' => $plain,
             'token_type' => 'Bearer',
+            'expires_in' => $ttl * 60,
             'requires_device_registration' => true,
             'requiresDeviceRegistration' => true,
             'user' => MobileApiUserResource::toArray($user, $request),
         ]);
+    }
+
+    private function mayExposeDebugOtp(): bool
+    {
+        return app()->environment('local')
+            && (bool) config('app.debug')
+            && (bool) config('pointrust.debug_otp_in_login_response');
     }
 }

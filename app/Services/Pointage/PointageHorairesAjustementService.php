@@ -25,22 +25,7 @@ final class PointageHorairesAjustementService
         $inArrivee = $this->isWithinPlage($at, $this->plageArriveeDebut(), $this->plageArriveeFin());
         $inDepart = $this->isWithinPlage($at, $this->plageDepartDebut(), $this->plageDepartFin());
 
-        $inferred = null;
-        $plage = null;
-        if ($inArrivee && ! $inDepart) {
-            $inferred = 'arrivee';
-            $plage = 'arrivee';
-        } elseif ($inDepart && ! $inArrivee) {
-            $inferred = 'depart';
-            $plage = 'depart';
-        } elseif ($inArrivee && $inDepart) {
-            return [
-                'ok' => false,
-                'message' => 'Heure ambiguë : contactez le RH (plages arrivée et départ se chevauchent).',
-            ];
-        }
-
-        if ($inferred === null) {
+        if (! $inArrivee && ! $inDepart) {
             return [
                 'ok' => false,
                 'message' => sprintf(
@@ -54,6 +39,36 @@ final class PointageHorairesAjustementService
             ];
         }
 
+        // Honorer le type demandé par l’app dès qu’il est dans sa plage
+        // (évite de forcer une « arrivée » alors que l’utilisateur veut une sortie).
+        if ($requested === 'arrivee' && $inArrivee) {
+            return [
+                'ok' => true,
+                'type' => 'arrivee',
+                'plage' => 'arrivee',
+                'requested_type' => $requested,
+                'type_auto_corrected' => false,
+            ];
+        }
+        if ($requested === 'depart' && $inDepart) {
+            return [
+                'ok' => true,
+                'type' => 'depart',
+                'plage' => 'depart',
+                'requested_type' => $requested,
+                'type_auto_corrected' => false,
+            ];
+        }
+
+        if ($inArrivee && $inDepart) {
+            return [
+                'ok' => false,
+                'message' => 'Heure ambiguë : contactez le RH (plages arrivée et départ se chevauchent).',
+            ];
+        }
+
+        $inferred = $inArrivee ? 'arrivee' : 'depart';
+        $plage = $inferred;
         $typeAutoCorrected = $requested !== null && $requested !== $inferred;
 
         return [

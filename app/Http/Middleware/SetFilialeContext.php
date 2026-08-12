@@ -21,8 +21,8 @@ class SetFilialeContext
             $user = Auth::user();
             
             // Si la filiale n'est pas déjà définie dans la session
-            if (!session()->has('current_filiale_id')) {
-                // Récupérer la filiale du profil de l'utilisateur
+            if (! session()->has('current_filiale_id')) {
+                $user->profilCollaborateurAssocie();
                 $profil = $user->profil;
                 
                 if ($profil && $profil->filiale_id) {

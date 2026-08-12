@@ -6,6 +6,7 @@ use App\Models\Agence;
 use App\Models\Pointage;
 use App\Models\Profil;
 use App\Support\FrenchDateFormat;
+use App\Support\SqlSafe;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -109,7 +110,7 @@ final class PointageRecuperationService
         }
 
         if ($filters['q'] !== '') {
-            $term = '%'.mb_strtolower($filters['q']).'%';
+            $term = SqlSafe::likeContains(mb_strtolower($filters['q']));
             $q->whereHas('user', function (Builder $w) use ($term): void {
                 $w->where(function (Builder $inner) use ($term): void {
                     $inner->whereRaw('LOWER(email) LIKE ?', [$term])

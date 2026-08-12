@@ -394,32 +394,32 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                             class="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-[#5B2C8F]"
                         />
                     </button>
-                </div>
+            </div>
 
                 <form class="flex flex-wrap items-end gap-3 border-b border-[#F1EFE8] px-5 py-4" @submit.prevent="applyFilters">
-                    <div class="min-w-[10rem] flex-1">
-                        <label class="text-[11px] font-bold uppercase text-[#888780]">Recherche</label>
-                        <input v-model="localFilters.q" type="search" placeholder="Employé, email…" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
-                    </div>
-                    <div>
-                        <label class="text-[11px] font-bold uppercase text-[#888780]">Type</label>
-                        <select v-model="localFilters.type" class="mt-1 rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
-                            <option value="tous">Tous</option>
+                <div class="min-w-[10rem] flex-1">
+                    <label class="text-[11px] font-bold uppercase text-[#888780]">Recherche</label>
+                    <input v-model="localFilters.q" type="search" placeholder="Employé, email…" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
+                </div>
+                <div>
+                    <label class="text-[11px] font-bold uppercase text-[#888780]">Type</label>
+                    <select v-model="localFilters.type" class="mt-1 rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
+                        <option value="tous">Tous</option>
                             <option v-for="t in typesFiltres" :key="t.value" :value="t.value">{{ t.label }}</option>
-                        </select>
-                    </div>
+                    </select>
+                </div>
                     <div v-if="localFilters.onglet === 'toutes'">
-                        <label class="text-[11px] font-bold uppercase text-[#888780]">Statut</label>
-                        <select v-model="localFilters.statut" class="mt-1 rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
-                            <option value="tous">Tous</option>
-                            <option value="en_attente_manager">En attente N+1</option>
-                            <option value="en_attente_rh">En attente RH</option>
-                            <option value="valide">Validé</option>
-                            <option value="rejete">Rejeté</option>
-                        </select>
-                    </div>
-                    <button type="submit" class="rounded-md bg-[#185FA5] px-4 py-2 text-sm font-medium text-white">Filtrer</button>
-                </form>
+                    <label class="text-[11px] font-bold uppercase text-[#888780]">Statut</label>
+                    <select v-model="localFilters.statut" class="mt-1 rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
+                        <option value="tous">Tous</option>
+                        <option value="en_attente_manager">En attente N+1</option>
+                        <option value="en_attente_rh">En attente RH</option>
+                        <option value="valide">Validé</option>
+                        <option value="rejete">Rejeté</option>
+                    </select>
+                </div>
+                <button type="submit" class="rounded-md bg-[#185FA5] px-4 py-2 text-sm font-medium text-white">Filtrer</button>
+            </form>
 
                 <div class="overflow-x-auto">
                     <!-- Layout image 3 : Toutes les demandes -->
@@ -481,7 +481,7 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                                     </div>
                                 </td>
                                 <td class="px-4 py-4">
-                                    <span
+                                        <span
                                         class="text-sm font-semibold"
                                         :class="isTermine(d) ? 'text-[#E11D48]' : 'text-[#6B7280]'"
                                     >

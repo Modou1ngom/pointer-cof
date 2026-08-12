@@ -11,7 +11,7 @@ import ActionIconButton from '@/components/pointage/ActionIconButton.vue';
 import PointageLayout from '@/layouts/pointage/PointageLayout.vue';
 import type { BreadcrumbItem } from '@/types';
 import { Link, router, usePage } from '@inertiajs/vue3';
-import { Eye, PauseCircle, Pencil, PlayCircle } from 'lucide-vue-next';
+import { Eye, PauseCircle, Pencil, PlayCircle, Umbrella } from 'lucide-vue-next';
 import { computed, reactive, ref, watch } from 'vue';
 import { readCsrfTokenFromDom } from '@/lib/csrf';
 
@@ -60,6 +60,8 @@ type AffectationRow = {
     date_affectation: string | null;
     enrolled_at: string | null;
     has_user_account: boolean;
+    note_type?: string | null;
+    note_label?: string | null;
 };
 
 const props = defineProps<{
@@ -98,6 +100,30 @@ const breadcrumbs: BreadcrumbItem[] = [
 
 const enrollOpen = ref(false);
 const creationOpen = ref(false);
+const congeOpen = ref(false);
+const congeRow = ref<AffectationRow | null>(null);
+const congeTypes = [
+    { value: 'conge_annuel', label: 'Congé annuel' },
+    { value: 'conge_maladie', label: 'Congé maladie' },
+    { value: 'permission_exceptionnelle', label: 'Permission exceptionnelle' },
+    { value: 'mission', label: 'Mission' },
+] as const;
+const congeForm = reactive({
+    type: 'conge_annuel',
+    date_concernee: new Date().toISOString().slice(0, 10),
+    date_fin: new Date().toISOString().slice(0, 10),
+    heure_debut: '08:00',
+    heure_fin: '17:00',
+    lieu: '',
+    motif: 'Congé annuel',
+    commentaire: '',
+});
+const congeLoading = ref(false);
+const congeNeedsHeures = computed(() => congeForm.type === 'permission_exceptionnelle');
+const congeNeedsLieu = computed(() => congeForm.type === 'mission');
+function congeTypeLabel(value: string): string {
+    return congeTypes.find((t) => t.value === value)?.label ?? value;
+}
 const emailSearch = ref('');
 const lookupLoading = ref(false);
 const enrollLoading = ref(false);
@@ -295,6 +321,23 @@ function statutBadgeClass(actif: boolean): string {
 
 function statutLabel(actif: boolean): string {
     return actif ? 'Actif' : 'Inactif';
+}
+
+function noteBadgeClass(type: string | null | undefined): string {
+    switch (type) {
+        case 'conge_annuel':
+            return 'bg-violet-100 text-violet-700';
+        case 'conge_maladie':
+            return 'bg-pink-100 text-pink-700';
+        case 'permission_exceptionnelle':
+            return 'bg-amber-100 text-amber-800';
+        case 'mission':
+            return 'bg-teal-100 text-teal-700';
+        case 'formation':
+            return 'bg-blue-100 text-blue-700';
+        default:
+            return 'bg-[#F5FAFF] text-[#185FA5]';
+    }
 }
 
 function profilStatutLabel(statut: string | null | undefined): string {
@@ -571,6 +614,53 @@ async function openAffectation(id: number, readOnly: boolean) {
 
 function toggleStatutAffectation(row: AffectationRow) {
     router.patch(`/pointage/rh/affectations/${row.id}/statut`, {}, { preserveScroll: true });
+}
+
+function openConge(row: AffectationRow) {
+    if (!row.has_user_account) {
+        return;
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    congeRow.value = row;
+    congeForm.type = 'conge_annuel';
+    congeForm.date_concernee = today;
+    congeForm.date_fin = today;
+    congeForm.heure_debut = '08:00';
+    congeForm.heure_fin = '17:00';
+    congeForm.lieu = '';
+    congeForm.motif = 'Congé annuel';
+    congeForm.commentaire = '';
+    congeOpen.value = true;
+}
+
+function submitConge() {
+    if (!congeRow.value) {
+        return;
+    }
+    congeLoading.value = true;
+    router.post(
+        `/pointage/rh/affectations/${congeRow.value.id}/conge`,
+        {
+            type: congeForm.type,
+            date_concernee: congeForm.date_concernee,
+            date_fin: congeForm.date_fin,
+            heure_debut: congeNeedsHeures.value ? congeForm.heure_debut : null,
+            heure_fin: congeNeedsHeures.value ? congeForm.heure_fin : null,
+            lieu: congeNeedsLieu.value ? congeForm.lieu : null,
+            motif: congeForm.motif,
+            commentaire: congeForm.commentaire || null,
+        },
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                congeLoading.value = false;
+            },
+            onSuccess: () => {
+                congeOpen.value = false;
+                congeRow.value = null;
+            },
+        },
+    );
 }
 
 async function saveParametrage() {
@@ -1300,6 +1390,73 @@ async function definirPrincipale(a: AgenceAutorisee) {
                 </DialogContent>
             </Dialog>
 
+            <Dialog v-model:open="congeOpen">
+                <DialogContent class="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Déclarer une demande</DialogTitle>
+                        <DialogDescription>
+                            {{ congeRow ? `${congeRow.prenom} ${congeRow.nom}` : '' }}
+                            — l’employé sera justifié, plus compté en absence.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <form class="space-y-3 py-2" @submit.prevent="submitConge">
+                        <div>
+                            <label class="text-[10px] font-bold uppercase text-[#888780]" for="conge-type">Type</label>
+                            <select
+                                id="conge-type"
+                                v-model="congeForm.type"
+                                class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm text-[#0C447C]"
+                                @change="congeForm.motif = congeTypeLabel(congeForm.type)"
+                            >
+                                <option v-for="t in congeTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
+                            </select>
+                        </div>
+                        <div class="grid gap-3 sm:grid-cols-2">
+                            <div>
+                                <label class="text-[10px] font-bold uppercase text-[#888780]" for="conge-debut">Date de début</label>
+                                <input id="conge-debut" v-model="congeForm.date_concernee" type="date" required class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
+                            </div>
+                            <div>
+                                <label class="text-[10px] font-bold uppercase text-[#888780]" for="conge-fin">Date de fin</label>
+                                <input id="conge-fin" v-model="congeForm.date_fin" type="date" required class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
+                            </div>
+                        </div>
+                        <div v-if="congeNeedsHeures" class="grid gap-3 sm:grid-cols-2">
+                            <div>
+                                <label class="text-[10px] font-bold uppercase text-[#888780]" for="conge-hdebut">Heure de début</label>
+                                <input id="conge-hdebut" v-model="congeForm.heure_debut" type="time" required class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
+                            </div>
+                            <div>
+                                <label class="text-[10px] font-bold uppercase text-[#888780]" for="conge-hfin">Heure de fin</label>
+                                <input id="conge-hfin" v-model="congeForm.heure_fin" type="time" required class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
+                            </div>
+                        </div>
+                        <div v-if="congeNeedsLieu">
+                            <label class="text-[10px] font-bold uppercase text-[#888780]" for="conge-lieu">Lieu</label>
+                            <input id="conge-lieu" v-model="congeForm.lieu" type="text" required class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold uppercase text-[#888780]" for="conge-motif">Motif</label>
+                            <input id="conge-motif" v-model="congeForm.motif" type="text" required class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold uppercase text-[#888780]" for="conge-comment">Commentaire</label>
+                            <textarea id="conge-comment" v-model="congeForm.commentaire" rows="2" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
+                        </div>
+                        <DialogFooter>
+                            <button type="button" class="rounded-md border border-[#e2e0d8] px-4 py-2 text-sm" @click="congeOpen = false">Annuler</button>
+                            <button
+                                type="submit"
+                                class="rounded-md bg-[#185FA5] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                                :disabled="congeLoading"
+                            >
+                                {{ congeLoading ? 'Enregistrement…' : 'Enregistrer' }}
+                            </button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
             <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <p class="text-sm font-medium text-[#0C447C]">
                     <span class="tabular-nums">{{ total_enroles }}</span> enrôlé{{ total_enroles > 1 ? 's' : '' }}
@@ -1359,6 +1516,7 @@ async function definirPrincipale(a: AgenceAutorisee) {
                                 <th class="px-4 py-3" title="Agence pointage principale, ou agence du profil">Agence</th>
                                 <th class="px-4 py-3">Horaire</th>
                                 <th class="px-4 py-3">Statut</th>
+                                <th class="px-4 py-3">Demande</th>
                                 <th class="px-4 py-3 text-right">Actions</th>
                         </tr>
                     </thead>
@@ -1376,6 +1534,17 @@ async function definirPrincipale(a: AgenceAutorisee) {
                                     <span class="inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold" :class="statutBadgeClass(a.statut_activation)">
                                         {{ statutLabel(a.statut_activation) }}
                                     </span>
+                                </td>
+                                <td class="px-4 py-3">
+                                    <span
+                                        v-if="a.note_label"
+                                        class="inline-flex max-w-[11rem] truncate rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                                        :class="noteBadgeClass(a.note_type)"
+                                        :title="a.note_label"
+                                    >
+                                        {{ a.note_label }}
+                                    </span>
+                                    <span v-else class="text-xs text-[#C0BCB0]">—</span>
                                 </td>
                                 <td class="px-4 py-3 text-right">
                                     <div class="inline-flex items-center justify-end gap-0.5">
@@ -1402,11 +1571,18 @@ async function definirPrincipale(a: AgenceAutorisee) {
                                             />
                                             <PlayCircle v-else class="h-4 w-4" />
                                         </ActionIconButton>
+                                        <ActionIconButton
+                                            title="Déclarer une demande"
+                                            :disabled="!a.has_user_account"
+                                            @click="openConge(a)"
+                                        >
+                                            <Umbrella class="h-4 w-4" />
+                                        </ActionIconButton>
                                     </div>
                                 </td>
                             </tr>
                             <tr v-if="!affectations.data?.length">
-                                <td colspan="7" class="px-4 py-12 text-center text-[#888780]">Aucune affectation enrôlée. Cliquez sur « Enrôler ».</td>
+                                <td colspan="8" class="px-4 py-12 text-center text-[#888780]">Aucune affectation enrôlée. Cliquez sur « Enrôler ».</td>
                         </tr>
                     </tbody>
                 </table>

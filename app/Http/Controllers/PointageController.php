@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Exports\PointageFicheHorairesExport;
 use App\Models\Agence;
+use App\Models\Departement;
 use App\Models\Pointage;
 use App\Models\PointageAffectation;
 use App\Models\PointageAuditLog;
@@ -589,7 +590,14 @@ class PointageController extends Controller
         $user->profilCollaborateurAssocie();
         $me = $user->profil;
 
-        $profilsQuery = Profil::query()->where('statut', 'actif');
+        $profilsQuery = Profil::query()
+            ->where('statut', 'actif')
+            ->whereNotExists(function ($q): void {
+                $q->selectRaw('1')
+                    ->from('pointage_affectations')
+                    ->whereColumn('pointage_affectations.profil_id', 'profiles.id')
+                    ->where('pointage_affectations.statut_activation', false);
+            });
 
         if ($me && $user->isResponsableDepartement() && ! $user->isAdmin() && ! $user->isRh()) {
             $dept = \App\Models\Departement::query()
@@ -729,9 +737,28 @@ class PointageController extends Controller
             ->paginate(25)
             ->withQueryString();
 
-        $affectations->getCollection()->transform(
-            fn (PointageAffectation $a) => PointageRhAffectationController::affectationListItemPayload($a)
-        );
+        $userIdsPage = $affectations->getCollection()
+            ->pluck('user_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+        $notesJour = PointageDeclarationCouverture::mapPourUsersJour($userIdsPage, Carbon::today());
+
+        $affectations->getCollection()->transform(function (PointageAffectation $a) use ($notesJour) {
+            $payload = PointageRhAffectationController::affectationListItemPayload($a);
+            $note = $a->user_id ? $notesJour->get((int) $a->user_id) : null;
+            if (is_array($note) && ($note['couvert'] ?? false)) {
+                $payload['note_type'] = $note['type'] ?? null;
+                $payload['note_label'] = $note['label'] ?? null;
+            } else {
+                $payload['note_type'] = null;
+                $payload['note_label'] = null;
+            }
+
+            return $payload;
+        });
 
         return Inertia::render('Pointage/RhEmployes', [
             'affectations' => $affectations,
@@ -871,7 +898,7 @@ class PointageController extends Controller
         ]);
     }
 
-    public function rhRecuperationPointages(Request $request, PointageRecuperationService $recuperation)
+    public function rhRecuperationPointages(Request $request, PointageRecuperationService $recuperation, PointageRapportController $rapport)
     {
         $user = Auth::user();
         abort_unless($user && ($user->isRh() || $user->isAdmin()), 403);
@@ -897,12 +924,76 @@ class PointageController extends Controller
             ]
         );
 
+        $dateRef = \Carbon\Carbon::parse($filters['date_fin'])->startOfDay();
+        $departement = $request->filled('departement') ? (string) $request->input('departement') : null;
+        $statut = $request->filled('statut_presence') ? (string) $request->input('statut_presence') : null;
+        if ($statut === 'tous' || $statut === '') {
+            $statut = null;
+        }
+        $mois = $request->filled('mois') ? (string) $request->input('mois') : $dateRef->format('Y-m');
+        if (preg_match('/^\d{4}-\d{2}$/', $mois) === 1 && ! $request->filled('date_fin')) {
+            try {
+                $moisStart = \Carbon\Carbon::createFromFormat('Y-m', $mois)->startOfMonth();
+                $moisEnd = $moisStart->copy()->endOfMonth();
+                $today = \Carbon\Carbon::today();
+                $dateRef = $moisEnd->gt($today) ? $today->copy() : $moisEnd->copy()->startOfDay();
+                $filters['date_debut'] = $moisStart->toDateString();
+                $filters['date_fin'] = $dateRef->toDateString();
+            } catch (\Throwable) {
+                // keep existing dates
+            }
+        }
+
+        $reportingFilters = [
+            'date' => $filters['date_fin'],
+            'mois' => $mois,
+            'annee' => $dateRef->format('Y'),
+            'date_debut' => $filters['date_debut'],
+            'date_fin' => $filters['date_fin'],
+            'agence_id' => $filters['agence_id'],
+            'departement' => $departement,
+            'user_id' => null,
+            'statut' => $statut,
+            'format' => 'csv',
+        ];
+
+        $reportingQuery = http_build_query(array_filter([
+            'date' => $reportingFilters['date'],
+            'agence_id' => $reportingFilters['agence_id'],
+            'departement' => $reportingFilters['departement'],
+            'statut' => $reportingFilters['statut'],
+            'mois' => $reportingFilters['mois'],
+        ]));
+
+        $mode = $request->query('mode', 'overview');
+        if (! in_array($mode, ['overview', 'lignes'], true)) {
+            $mode = 'overview';
+        }
+
         return Inertia::render('Pointage/Presence/RecuperationPointages', [
             'pointages' => $paginator,
             'kpis' => $recuperation->kpis($filters),
+            'reporting_dashboard' => $rapport->buildDashboard($dateRef, $reportingFilters),
+            'reporting_href' => '/pointage/rapport/reporting'.($reportingQuery !== '' ? '?'.$reportingQuery : ''),
+            'mode' => $mode,
             'periode_label' => $recuperation->periodeLabel($filters),
-            'filters' => $filters,
+            'filters' => array_merge($filters, [
+                'departement' => $departement ?? '',
+                'mois' => $mois,
+                'statut_presence' => $statut ?? '',
+            ]),
             'agences' => $recuperation->agencesOptions(),
+            'departements' => Departement::query()->where('actif', true)->orderBy('nom')->pluck('nom')->values(),
+            'statut_types' => [
+                ['value' => 'present', 'label' => 'Présent'],
+                ['value' => 'retard', 'label' => 'Retard'],
+                ['value' => 'absence', 'label' => 'Absence'],
+                ['value' => 'conge_annuel', 'label' => 'Congé annuel'],
+                ['value' => 'conge_maladie', 'label' => 'Congé maladie'],
+                ['value' => 'permission_exceptionnelle', 'label' => 'Permission exceptionnelle'],
+                ['value' => 'mission', 'label' => 'Mission'],
+                ['value' => 'formation', 'label' => 'Formation'],
+            ],
         ]);
     }
 
@@ -967,6 +1058,12 @@ class PointageController extends Controller
                     ->from('users')
                     ->whereColumn('users.email', 'profiles.email')
                     ->where('users.is_active', true);
+            })
+            ->whereNotExists(function ($q): void {
+                $q->selectRaw('1')
+                    ->from('pointage_affectations')
+                    ->whereColumn('pointage_affectations.profil_id', 'profiles.id')
+                    ->where('pointage_affectations.statut_activation', false);
             });
 
         if ($agenceFiltre !== '' && $agenceFiltre !== 'tous') {

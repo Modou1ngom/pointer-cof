@@ -53,15 +53,12 @@ class PointageRapportController extends Controller
             'format' => 'csv',
         ];
 
-        $dateRef = Carbon::parse($filters['date'])->startOfDay();
-
         return Inertia::render('Pointage/ReportingRh', [
             'defaults' => $filters,
             'rapports' => $this->rapportsCatalog(),
             'agences' => Agence::query()->where('actif', true)->orderBy('nom')->get(['id', 'nom']),
             'departements' => Departement::query()->where('actif', true)->orderBy('nom')->pluck('nom')->values(),
             'collaborateurs' => $this->collaborateursOptions(),
-            'dashboard' => $this->buildReportingDashboard($dateRef, $filters),
         ]);
     }
 
@@ -460,7 +457,7 @@ class PointageRapportController extends Controller
      */
     private function rapportMensuel(string $mois, array $filters): array
     {
-        $monthStart = Carbon::createFromFormat('Y-m-d', $mois.'-01')->startOfMonth();
+            $monthStart = Carbon::createFromFormat('Y-m-d', $mois.'-01')->startOfMonth();
         $monthEnd = $monthStart->copy()->endOfMonth()->endOfDay();
 
         return $this->rapportSynthesePeriode(
@@ -505,7 +502,7 @@ class PointageRapportController extends Controller
         $rows = [];
         for ($m = 1; $m <= 12; $m++) {
             $monthStart = Carbon::create($year, $m, 1)->startOfDay();
-            $monthEnd = $monthStart->copy()->endOfMonth()->endOfDay();
+        $monthEnd = $monthStart->copy()->endOfMonth()->endOfDay();
             $joursOuvres = $this->joursOuvresDansPeriode($monthStart, $monthEnd);
             $joursOuvresSet = array_fill_keys($joursOuvres, true);
             $joursCount = count($joursOuvres);
@@ -674,17 +671,40 @@ class PointageRapportController extends Controller
      * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
      */
+    /**
+     * Données KPI / graphiques pour le dashboard RH (réutilisé par Reporting RH).
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array<string, mixed>
+     */
+    public function buildDashboard(Carbon $dateRef, array $filters): array
+    {
+        return $this->buildReportingDashboard($dateRef, $filters);
+    }
+
     private function buildReportingDashboard(Carbon $dateRef, array $filters): array
     {
-        $userIds = $this->filteredUserIds($filters);
+        $baseUserIds = $this->filteredUserIds($filters);
+        $statutFilter = ! empty($filters['statut']) ? (string) $filters['statut'] : null;
+        if ($statutFilter === 'tous' || $statutFilter === '') {
+            $statutFilter = null;
+        }
+
+        $userIds = $statutFilter !== null
+            ? $this->filterUserIdsByStatutJour($dateRef, $baseUserIds, $statutFilter)
+            : $baseUserIds;
+
         $effectif = count($userIds);
         $yesterday = $dateRef->copy()->subDay();
 
         $todayStats = $this->dayPresenceStats($dateRef, $userIds);
-        $yestStats = $this->dayPresenceStats($yesterday, $userIds);
+        $yestIds = $statutFilter !== null
+            ? $this->filterUserIdsByStatutJour($yesterday, $baseUserIds, $statutFilter)
+            : $baseUserIds;
+        $yestStats = $this->dayPresenceStats($yesterday, $yestIds);
 
         $presentsPct = $effectif > 0 ? (int) round(100 * $todayStats['presents'] / $effectif) : 0;
-        $yestPresentsPct = $effectif > 0 ? (int) round(100 * $yestStats['presents'] / $effectif) : 0;
+        $yestPresentsPct = count($yestIds) > 0 ? (int) round(100 * $yestStats['presents'] / count($yestIds)) : 0;
 
         $monthStart = $dateRef->copy()->startOfMonth();
         $monthEnd = $dateRef->copy()->endOfMonth()->endOfDay();
@@ -707,8 +727,11 @@ class PointageRapportController extends Controller
         $evolution = [];
         for ($i = 6; $i >= 0; $i--) {
             $d = $dateRef->copy()->subDays($i);
-            $s = $this->dayPresenceStats($d, $userIds);
-            $taux = $effectif > 0 ? (int) round(100 * $s['presents'] / $effectif) : 0;
+            $idsDay = $statutFilter !== null
+                ? $this->filterUserIdsByStatutJour($d, $baseUserIds, $statutFilter)
+                : $baseUserIds;
+            $s = $this->dayPresenceStats($d, $idsDay);
+            $taux = count($idsDay) > 0 ? (int) round(100 * $s['presents'] / count($idsDay)) : 0;
             $evolution[] = [
                 'date' => $d->toDateString(),
                 'label' => $d->translatedFormat('d M'),
@@ -747,6 +770,9 @@ class PointageRapportController extends Controller
                 'missions' => $todayStats['missions'],
                 'missions_pct' => $pct($todayStats['missions']),
                 'missions_delta' => $todayStats['missions'] - $yestStats['missions'],
+                'permissions' => $todayStats['permissions'],
+                'permissions_pct' => $pct($todayStats['permissions']),
+                'permissions_delta' => $todayStats['permissions'] - $yestStats['permissions'],
                 'heures_sup' => $this->heures->formatMinutes($heuresSupMinutes),
                 'heures_sup_delta' => $this->heures->formatMinutes($heuresSupMinutes - $prevSupMinutes),
                 'heures_sup_delta_positive' => ($heuresSupMinutes - $prevSupMinutes) >= 0,
@@ -762,7 +788,10 @@ class PointageRapportController extends Controller
             'repartition' => $this->repartitionStatutsDetail($dateRef, $userIds),
             'alertes' => array_sum(array_column($alertesDetail, 'count')),
             'alertes_list' => $alertesDetail,
+            'pointages_temps_reel' => $this->pointagesTempsReelPourJour($dateRef, $userIds),
             'statut_types' => [
+                ['value' => 'present', 'label' => 'Présent'],
+                ['value' => 'retard', 'label' => 'Retard'],
                 ['value' => 'absence', 'label' => 'Absence'],
                 ['value' => 'conge_annuel', 'label' => 'Congé annuel'],
                 ['value' => 'conge_maladie', 'label' => 'Congé maladie'],
@@ -774,8 +803,103 @@ class PointageRapportController extends Controller
     }
 
     /**
+     * Filtre les utilisateurs selon leur statut de présence / demande du jour.
+     *
      * @param  list<int>  $userIds
-     * @param  array{presents: int, retards: int, absents: int, conges: int, missions: int}  $todayStats
+     * @return list<int>
+     */
+    private function filterUserIdsByStatutJour(Carbon $day, array $userIds, string $statut): array
+    {
+        if ($userIds === []) {
+            return [];
+        }
+
+        $statut = PointageDeclarationTypes::normalize($statut);
+        $joursSet = [$day->toDateString() => true];
+        $isOuvre = in_array($day->toDateString(), $this->joursOuvresDansPeriode($day, $day), true);
+
+        $pointagesByUser = Pointage::query()
+            ->whereIn('user_id', $userIds)
+            ->whereDate('clocked_at', $day->toDateString())
+            ->orderBy('clocked_at')
+            ->get()
+            ->groupBy('user_id');
+        $declsByUser = $this->declarationsValidesParUser($userIds, $day, $day);
+
+        $out = [];
+        foreach ($userIds as $uid) {
+            $items = $pointagesByUser->get($uid) ?? collect();
+            $coverage = $this->declarationCoverageByDay(
+                $declsByUser->get($uid) ?? collect(),
+                $joursSet,
+            );
+            $declKind = $coverage[$day->toDateString()] ?? null;
+            $status = $this->classifyPresenceJour($items, $declKind);
+            $kind = $status['kind'];
+
+            $match = match ($statut) {
+                'present' => $kind === 'present',
+                'retard' => $kind === 'present' && $status['is_retard'],
+                'absence' => $isOuvre && ($kind === null || $kind === 'absence'),
+                'mission' => $kind === 'mission',
+                'conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'formation' => $kind === $statut,
+                default => true,
+            };
+
+            if ($match) {
+                $out[] = (int) $uid;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Derniers pointages du jour pour le widget « temps réel ».
+     *
+     * @param  list<int>  $userIds
+     * @return list<array{id: int, employe: string, type: string, type_label: string, heure: string, agence: string}>
+     */
+    private function pointagesTempsReelPourJour(Carbon $day, array $userIds): array
+    {
+        if ($userIds === []) {
+            return [];
+        }
+
+        return Pointage::query()
+            ->with(['user.profil', 'agence'])
+            ->whereIn('user_id', $userIds)
+            ->whereDate('clocked_at', $day->toDateString())
+            ->where(function ($q): void {
+                $q->whereNull('statut')
+                    ->orWhere('statut', '!=', 'ferie_auto');
+            })
+            ->orderByDesc('clocked_at')
+            ->limit(8)
+            ->get()
+            ->map(function (Pointage $p): array {
+                $profil = $p->user?->profil;
+                $nom = trim(($profil?->prenom ?? '').' '.($profil?->nom ?? ''));
+                if ($nom === '') {
+                    $nom = (string) ($p->user?->name ?? 'Collaborateur');
+                }
+
+                return [
+                    'id' => (int) $p->id,
+                    'employe' => $nom,
+                    'type' => (string) $p->type,
+                    'type_label' => $p->type === 'arrivee' ? 'Arrivée' : 'Départ',
+                    'heure' => $p->heureReelleAffichee(),
+                    'agence' => (string) ($p->agence?->nom ?? '—'),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  list<int>  $userIds
+     * @param  array{presents: int, retards: int, absents: int, conges: int, missions: int, permissions: int}  $todayStats
      * @return list<array{id: string, label: string, count: int, severity: string}>
      */
     private function alertesRhPourJour(Carbon $day, array $userIds, array $todayStats): array
@@ -847,7 +971,7 @@ class PointageRapportController extends Controller
 
     /**
      * @param  list<int>  $userIds
-     * @return array{presents: int, retards: int, absents: int, conges: int, missions: int}
+     * @return array{presents: int, retards: int, absents: int, conges: int, missions: int, permissions: int}
      */
     private function dayPresenceStats(Carbon $day, array $userIds): array
     {
@@ -868,19 +992,36 @@ class PointageRapportController extends Controller
         $absents = 0;
         $conges = 0;
         $missions = 0;
+        $permissions = 0;
 
         foreach ($userIds as $uid) {
             /** @var Collection<int, Pointage> $items */
             $items = $pointagesByUser->get($uid) ?? collect();
-            $arrivee = $items->firstWhere('type', 'arrivee');
-            $depart = $items
-                ->filter(fn (Pointage $p) => $p->type === 'depart')
-                ->sortByDesc(fn (Pointage $p) => $p->clocked_at->timestamp)
-                ->first();
+            $coverage = $this->declarationCoverageByDay(
+                $declsByUser->get($uid) ?? collect(),
+                $joursSet,
+            );
+            $declKind = $coverage[$day->toDateString()] ?? null;
+            $status = $this->classifyPresenceJour($items, $declKind);
 
-            if ($arrivee !== null || $depart !== null) {
+            if ($status['kind'] === 'mission') {
+                $missions++;
+
+                continue;
+            }
+            if ($status['kind'] === 'permission_exceptionnelle') {
+                $permissions++;
+
+                continue;
+            }
+            if (in_array($status['kind'], ['conge_annuel', 'conge_maladie', 'formation'], true)) {
+                $conges++;
+
+                continue;
+            }
+            if ($status['kind'] === 'present') {
                 $presents++;
-                if ($arrivee !== null && $arrivee->statut === 'retard') {
+                if ($status['is_retard']) {
                     $retards++;
                 }
 
@@ -891,21 +1032,44 @@ class PointageRapportController extends Controller
                 continue;
             }
 
-            $coverage = $this->declarationCoverageByDay(
-                $declsByUser->get($uid) ?? collect(),
-                $joursSet,
-            );
-            $kind = $coverage[$day->toDateString()] ?? null;
-            if ($kind === 'mission') {
-                $missions++;
-            } elseif (in_array($kind, ['conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'formation'], true)) {
-                $conges++;
-            } else {
-                $absents++;
-            }
+            $absents++;
         }
 
-        return compact('presents', 'retards', 'absents', 'conges', 'missions');
+        return compact('presents', 'retards', 'absents', 'conges', 'missions', 'permissions');
+    }
+
+    /**
+     * Présence réelle vs déclaration justifiée (ignore les pointages synthétiques RH / férié).
+     *
+     * @param  Collection<int, Pointage>  $items
+     * @return array{kind: string|null, is_retard: bool}
+     */
+    private function classifyPresenceJour(Collection $items, ?string $declarationKind): array
+    {
+        $justificatifs = [
+            'conge_annuel',
+            'conge_maladie',
+            'permission_exceptionnelle',
+            'mission',
+            'formation',
+            'absence',
+        ];
+        if ($declarationKind !== null && in_array($declarationKind, $justificatifs, true)) {
+            return ['kind' => $declarationKind, 'is_retard' => false];
+        }
+
+        $real = $items->filter(fn (Pointage $p) => ! $p->isSynthetic());
+        $arrivee = $real->first(fn (Pointage $p) => $p->type === 'arrivee');
+        $depart = $real->first(fn (Pointage $p) => $p->type === 'depart');
+
+        if ($arrivee !== null || $depart !== null) {
+            return [
+                'kind' => 'present',
+                'is_retard' => $arrivee !== null && $arrivee->statut === 'retard',
+            ];
+        }
+
+        return ['kind' => null, 'is_retard' => false];
     }
 
     /**
@@ -939,7 +1103,14 @@ class PointageRapportController extends Controller
 
         foreach ($userIds as $uid) {
             $items = $pointagesByUser->get($uid) ?? collect();
-            if ($items->isNotEmpty()) {
+            $coverage = $this->declarationCoverageByDay(
+                $declsByUser->get($uid) ?? collect(),
+                $joursSet,
+            );
+            $declKind = $coverage[$day->toDateString()] ?? null;
+            $status = $this->classifyPresenceJour($items, $declKind);
+
+            if ($status['kind'] === 'present') {
                 $counts['present']++;
 
                 continue;
@@ -949,11 +1120,7 @@ class PointageRapportController extends Controller
                 continue;
             }
 
-            $coverage = $this->declarationCoverageByDay(
-                $declsByUser->get($uid) ?? collect(),
-                $joursSet,
-            );
-            $kind = $coverage[$day->toDateString()] ?? 'absence';
+            $kind = $status['kind'] ?? 'absence';
             if (! isset($counts[$kind])) {
                 $kind = 'absence';
             }
@@ -1012,7 +1179,8 @@ class PointageRapportController extends Controller
             }
             $groups[$dept]['effectif']++;
             $items = $pointagesByUser->get($user->id) ?? collect();
-            if ($items->isNotEmpty()) {
+            $hasReal = $items->contains(fn (Pointage $p) => ! $p->isSynthetic());
+            if ($hasReal) {
                 $groups[$dept]['presents']++;
             }
         }
@@ -1110,12 +1278,12 @@ class PointageRapportController extends Controller
      */
     private function rapportRetards(Carbon $from, Carbon $to, array $filters): array
     {
-        $q = Pointage::query()
+            $q = Pointage::query()
             ->with(['user.profil', 'agence'])
             ->where('type', 'arrivee')
             ->where('statut', 'retard')
             ->whereBetween('clocked_at', [$from, $to])
-            ->orderBy('clocked_at');
+                ->orderBy('clocked_at');
         $this->applyCommonFilters($q, $filters);
 
         $rows = [];
@@ -1276,7 +1444,7 @@ class PointageRapportController extends Controller
             ->with('profil')
             ->whereIn('id', $userIds ?: [0])
             ->orderBy('name')
-            ->get();
+                ->get();
 
         $joursOuvres = $this->joursOuvresDansPeriode($from, $to);
         $joursOuvresSet = array_fill_keys($joursOuvres, true);
@@ -1322,28 +1490,18 @@ class PointageRapportController extends Controller
             foreach ($joursOuvres as $day) {
                 /** @var Collection<int, Pointage> $items */
                 $items = $byDay->get($day) ?? collect();
-                $arrivee = $items->firstWhere('type', 'arrivee');
-                $depart = $items
-                    ->filter(fn (Pointage $p) => $p->type === 'depart')
-                    ->sortByDesc(fn (Pointage $p) => $p->clocked_at->timestamp)
-                    ->first();
+                $status = $this->classifyPresenceJour($items, $coverage[$day] ?? null);
 
-                if ($arrivee !== null || $depart !== null) {
+                if ($status['kind'] === 'mission') {
+                    $stats[$groupe]['missions']++;
+                } elseif (in_array($status['kind'], ['conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'formation'], true)) {
+                    $stats[$groupe]['conges']++;
+                } elseif ($status['kind'] === 'present') {
                     $stats[$groupe]['presences']++;
-                    if ($arrivee !== null && $arrivee->statut === 'retard') {
+                    if ($status['is_retard']) {
                         $stats[$groupe]['retards']++;
                     }
-
-                    continue;
-                }
-
-                $kind = $coverage[$day] ?? null;
-                if ($kind === 'mission') {
-                    $stats[$groupe]['missions']++;
-                } elseif (in_array($kind, ['conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'formation'], true)) {
-                    $stats[$groupe]['conges']++;
                 } else {
-                    // null = non justifié ; 'absence' = déclaration d’absence validée
                     $stats[$groupe]['absences']++;
                 }
             }
@@ -1655,6 +1813,12 @@ class PointageRapportController extends Controller
                     ->whereColumn('users.email', 'profiles.email')
                     ->where('users.is_active', true);
             })
+            ->whereNotExists(function ($sub): void {
+                $sub->selectRaw('1')
+                    ->from('pointage_affectations')
+                    ->whereColumn('pointage_affectations.profil_id', 'profiles.id')
+                    ->where('pointage_affectations.statut_activation', false);
+            })
             ->pluck('email')
             ->filter()
             ->unique()
@@ -1663,6 +1827,12 @@ class PointageRapportController extends Controller
         return User::query()
             ->whereIn('email', $emails)
             ->where('is_active', true)
+            ->whereNotExists(function ($sub): void {
+                $sub->selectRaw('1')
+                    ->from('pointage_affectations')
+                    ->whereColumn('pointage_affectations.user_id', 'users.id')
+                    ->where('pointage_affectations.statut_activation', false);
+            })
             ->orderBy('name')
             ->pluck('id')
             ->map(fn ($id) => (int) $id)

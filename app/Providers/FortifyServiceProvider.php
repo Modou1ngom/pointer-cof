@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Actions\Fortify\CreateNewUser;
 use App\Actions\Fortify\ResetUserPassword;
 use App\Models\User;
+use App\Support\LoginAttemptGuard;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -94,7 +95,10 @@ class FortifyServiceProvider extends ServiceProvider
         RateLimiter::for('login', function (Request $request) {
             $throttleKey = Str::transliterate(Str::lower($request->input(Fortify::username())).'|'.$request->ip());
 
-            return Limit::perMinute(5)->by($throttleKey);
+            return [
+                Limit::perMinute(5)->by($throttleKey),
+                Limit::perMinute(20)->by($request->ip()),
+            ];
         });
     }
 
@@ -104,27 +108,34 @@ class FortifyServiceProvider extends ServiceProvider
     private function configureAuthentication(): void
     {
         Fortify::authenticateUsing(function (Request $request) {
-            // Récupérer l'utilisateur par email
-            $user = User::where('email', $request->email)->first();
-            
-            if ($user) {
-                // Vérifier si l'utilisateur est actif
-                if (!$user->is_active) {
-                    throw ValidationException::withMessages([
-                        'email' => 'Votre compte utilisateur a été désactivé. Vous ne pouvez pas vous connecter. Veuillez contacter votre administrateur système pour réactiver votre compte.',
-                    ]);
-                }
+            $email = mb_strtolower(trim((string) $request->input('email')));
+            LoginAttemptGuard::ensureNotLocked($email, $request->ip());
 
-                // Vérifier le mot de passe directement avec Hash::check
-                if (Hash::check($request->password, $user->password)) {
-                    return $user;
-                }
+            $user = User::query()->whereRaw('LOWER(TRIM(email)) = ?', [$email])->first();
+
+            $passwordOk = Hash::check(
+                (string) $request->input('password'),
+                $user?->password ?? '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
+            );
+
+            if (! $user || ! $passwordOk) {
+                LoginAttemptGuard::hit($email, $request->ip());
+                throw ValidationException::withMessages([
+                    'email' => 'Identifiants incorrects.',
+                ]);
             }
 
-            // Si l'authentification échoue, lancer une exception de validation avec un message en français
-            throw ValidationException::withMessages([
-                'email' => 'Ces identifiants ne correspondent à aucun compte.',
-            ]);
+            if (! $user->is_active) {
+                LoginAttemptGuard::hit($email, $request->ip());
+                throw ValidationException::withMessages([
+                    'email' => 'Identifiants incorrects.',
+                ]);
+            }
+
+            LoginAttemptGuard::clear($email, $request->ip());
+            $request->session()->regenerate();
+
+            return $user;
         });
     }
 

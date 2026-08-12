@@ -1,12 +1,20 @@
 <?php
 
+$origins = array_values(array_filter(array_map('trim', explode(',', (string) env('CORS_ALLOWED_ORIGINS', '')))));
+
+if ($origins === []) {
+    $origins = env('APP_ENV') === 'production'
+        ? array_values(array_filter([(string) env('APP_URL')]))
+        : ['*'];
+}
+
 return [
 
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
-    'allowed_methods' => ['*'],
+    'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
-    'allowed_origins' => ['*'],
+    'allowed_origins' => $origins,
 
     'allowed_origins_patterns' => [],
 

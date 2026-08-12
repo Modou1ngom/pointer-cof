@@ -32,6 +32,8 @@ class PasswordController extends Controller
         $request->user()->update([
             'password' => $validated['password'],
         ]);
+        $request->user()->tokens()->delete();
+        $request->session()->regenerate();
 
         return back();
     }
