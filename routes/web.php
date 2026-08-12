@@ -131,6 +131,7 @@ Route::middleware(['auth'])->group(function () {
                 Route::get('{affectation}', [PointageRhAffectationController::class, 'show'])->name('show');
                 Route::patch('{affectation}/statut', [PointageRhAffectationController::class, 'toggleStatut'])->name('statut');
                 Route::post('{affectation}/conge', [PointageRhAffectationController::class, 'declarerConge'])->name('conge');
+                Route::delete('{affectation}/conge', [PointageRhAffectationController::class, 'retirerConge'])->name('conge.destroy');
                 Route::post('{affectation}/parametrage', [PointageRhAffectationController::class, 'saveParametrage'])->name('parametrage');
                 Route::post('{affectation}/agences', [PointageRhAffectationController::class, 'attachAgence'])->name('agences.attach');
                 Route::patch('{affectation}/agences/{agence}', [PointageRhAffectationController::class, 'updateAgence'])->name('agences.update');

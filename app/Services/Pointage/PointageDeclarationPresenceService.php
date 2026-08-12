@@ -73,6 +73,38 @@ final class PointageDeclarationPresenceService
         return $createdOrUpdated;
     }
 
+    /**
+     * Retire les pointages / attendances synthétiques créés pour une déclaration.
+     */
+    public function retirerApresAnnulationRh(PointageDeclaration $declaration): int
+    {
+        $declarationId = (int) $declaration->id;
+        $userId = (int) $declaration->user_id;
+        if ($declarationId <= 0 || $userId <= 0) {
+            return 0;
+        }
+
+        $removed = 0;
+
+        $pointages = Pointage::query()
+            ->where('user_id', $userId)
+            ->where('meta->declaration_id', $declarationId)
+            ->where('meta->source', 'declaration_rh')
+            ->get();
+
+        foreach ($pointages as $pointage) {
+            $pointage->delete();
+            $removed++;
+        }
+
+        $removed += Attendance::query()
+            ->where('user_id', $userId)
+            ->where('qr_payload', 'declaration:'.$declarationId)
+            ->delete();
+
+        return $removed;
+    }
+
     private function needsArrivee(PointageDeclaration $d): bool
     {
         if ($d->type !== 'regularisation') {

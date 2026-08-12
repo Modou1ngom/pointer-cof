@@ -12,6 +12,7 @@ use App\Models\PointageDeclaration;
 use App\Models\Profil;
 use App\Models\User;
 use App\Services\Pointage\PointageDeclarationPresenceService;
+use App\Support\PointageDeclarationCouverture;
 use App\Support\PointageDeclarationTypes;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
@@ -412,6 +413,68 @@ class PointageRhAffectationController extends Controller
         );
 
         return back()->with('success', PointageDeclarationTypes::label($type).' enregistré : l’employé n’est plus compté en absence sur cette période.');
+    }
+
+    public function retirerConge(Request $request, PointageAffectation $affectation): RedirectResponse
+    {
+        $actor = $this->actor();
+        $affectation->syncUserLinkFromProfilEmail();
+        if (! $affectation->user_id) {
+            return back()->with('error', 'Cet employé n’a pas de compte utilisateur.');
+        }
+        $this->ensureCanManageUser($actor, $affectation->user);
+
+        $declarationId = (int) $request->input('declaration_id', 0);
+        $couverture = PointageDeclarationCouverture::pourUserJour((int) $affectation->user_id, Carbon::today());
+
+        if ($declarationId <= 0) {
+            $declarationId = (int) ($couverture['declaration_id'] ?? 0);
+        }
+
+        if ($declarationId <= 0 || ! ($couverture['couvert'] ?? false)) {
+            return back()->with('error', 'Aucune demande active à retirer pour aujourd’hui.');
+        }
+
+        if ((int) ($couverture['declaration_id'] ?? 0) !== $declarationId) {
+            return back()->with('error', 'Cette demande ne couvre pas la journée en cours.');
+        }
+
+        $declaration = PointageDeclaration::query()
+            ->where('id', $declarationId)
+            ->where('user_id', $affectation->user_id)
+            ->where('statut', 'valide')
+            ->first();
+
+        if ($declaration === null) {
+            return back()->with('error', 'Demande introuvable ou déjà retirée.');
+        }
+
+        $label = PointageDeclarationTypes::label((string) $declaration->type);
+
+        $declaration->forceFill([
+            'statut' => 'rejete',
+            'rh_user_id' => $actor->id,
+            'rh_decided_at' => now(),
+            'rh_comment' => trim((string) ($declaration->rh_comment ? $declaration->rh_comment.' | ' : '').'Retiré par RH depuis l’affectation.'),
+        ])->save();
+
+        app(PointageDeclarationPresenceService::class)->retirerApresAnnulationRh($declaration);
+
+        $this->logHistory($affectation->user_id, $actor->id, 'declaration_conge_retiree', [
+            'declaration_id' => $declaration->id,
+            'type' => $declaration->type,
+        ]);
+        PointageAuditLog::record(
+            $actor,
+            'DECLARATION_CONGE_RH_RETIREE',
+            $label.' retiré par RH pour '.$affectation->user->name,
+            null,
+            $request->ip(),
+            'ok',
+            ['declaration_id' => $declaration->id, 'user_id' => $affectation->user_id]
+        );
+
+        return back()->with('success', $label.' retiré : l’employé peut à nouveau être compté en absence si non pointé.');
     }
 
     public function saveParametrage(Request $request, PointageAffectation $affectation): JsonResponse

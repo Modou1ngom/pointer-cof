@@ -753,9 +753,11 @@ class PointageController extends Controller
                 if (is_array($note) && ($note['couvert'] ?? false)) {
                     $payload['note_type'] = $note['type'] ?? null;
                     $payload['note_label'] = $note['label'] ?? null;
+                    $payload['note_declaration_id'] = $note['declaration_id'] ?? null;
                 } else {
                     $payload['note_type'] = null;
                     $payload['note_label'] = null;
+                    $payload['note_declaration_id'] = null;
                 }
 
                 return $payload;

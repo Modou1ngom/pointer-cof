@@ -62,6 +62,7 @@ type AffectationRow = {
     has_user_account: boolean;
     note_type?: string | null;
     note_label?: string | null;
+    note_declaration_id?: number | null;
 };
 
 const props = defineProps<{
@@ -619,6 +620,17 @@ function toggleStatutAffectation(row: AffectationRow) {
 
 function openConge(row: AffectationRow) {
     if (!row.has_user_account) {
+        return;
+    }
+    // Bascule : si une demande couvre déjà aujourd’hui, la retirer.
+    if (row.note_type && row.note_declaration_id) {
+        if (!window.confirm(`Retirer « ${row.note_label ?? 'la demande'} » pour ${row.prenom} ${row.nom} ?`)) {
+            return;
+        }
+        router.delete(`/pointage/rh/affectations/${row.id}/conge`, {
+            data: { declaration_id: row.note_declaration_id },
+            preserveScroll: true,
+        });
         return;
     }
     const today = new Date().toISOString().slice(0, 10);
@@ -1579,7 +1591,8 @@ async function definirPrincipale(a: AgenceAutorisee) {
                                             <PlayCircle v-else class="h-4 w-4" />
                                         </ActionIconButton>
                                         <ActionIconButton
-                                            title="Déclarer une demande"
+                                            :title="a.note_type ? `Retirer « ${a.note_label ?? 'demande'} »` : 'Déclarer une demande'"
+                                            :variant="a.note_type ? 'danger' : 'default'"
                                             :disabled="!a.has_user_account"
                                             @click="openConge(a)"
                                         >
