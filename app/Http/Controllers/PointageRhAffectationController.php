@@ -698,6 +698,33 @@ class PointageRhAffectationController extends Controller
      */
     public static function profilFormOptions(User $actor): array
     {
+        $userFilialeId = null;
+        if (! $actor->isSuperAdmin()) {
+            $userFiliales = $actor->filiales()->get();
+            if ($userFiliales->count() > 0) {
+                $userFilialeId = $userFiliales->first()->id;
+            } elseif ($actor->profil?->filiale_id) {
+                $userFilialeId = $actor->profil->filiale_id;
+            }
+        }
+
+        return [
+            'departements' => Departement::query()->where('actif', true)->orderBy('nom')->get(['id', 'nom']),
+            'profils' => [],
+            'filiales' => Filiale::query()->where('actif', true)->orderBy('nom')->get(['id', 'nom']),
+            'user_filiale_id' => $userFilialeId,
+            'is_super_admin' => $actor->isSuperAdmin(),
+            'next_matricule' => Profil::generateMatricule(),
+        ];
+    }
+
+    /**
+     * Liste légère des profils pour le sélecteur N+1 (chargée en différé, pas dans le HTML initial).
+     *
+     * @return list<array{id: int, nom: string, prenom: string, matricule: string|null}>
+     */
+    public static function n1ProfilOptions(User $actor): array
+    {
         $profilsQuery = Profil::query()->orderBy('nom')->orderBy('prenom');
         if (! $actor->isSuperAdmin()) {
             $filialeIds = $actor->filiales()->pluck('filiales.id')->all();
@@ -711,24 +738,16 @@ class PointageRhAffectationController extends Controller
             }
         }
 
-        $userFilialeId = null;
-        if (! $actor->isSuperAdmin()) {
-            $userFiliales = $actor->filiales()->get();
-            if ($userFiliales->count() > 0) {
-                $userFilialeId = $userFiliales->first()->id;
-            } elseif ($actor->profil?->filiale_id) {
-                $userFilialeId = $actor->profil->filiale_id;
-            }
-        }
-
-        return [
-            'departements' => Departement::query()->where('actif', true)->orderBy('nom')->get(['id', 'nom']),
-            'profils' => $profilsQuery->get(['id', 'nom', 'prenom', 'matricule']),
-            'filiales' => Filiale::query()->where('actif', true)->orderBy('nom')->get(['id', 'nom']),
-            'user_filiale_id' => $userFilialeId,
-            'is_super_admin' => $actor->isSuperAdmin(),
-            'next_matricule' => Profil::generateMatricule(),
-        ];
+        return $profilsQuery
+            ->get(['id', 'nom', 'prenom', 'matricule'])
+            ->map(fn (Profil $p) => [
+                'id' => (int) $p->id,
+                'nom' => (string) $p->nom,
+                'prenom' => (string) $p->prenom,
+                'matricule' => $p->matricule,
+            ])
+            ->values()
+            ->all();
     }
 
     /**

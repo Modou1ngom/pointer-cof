@@ -729,39 +729,44 @@ class PointageController extends Controller
         $totalEnroles = (clone $query)->count();
         $totalActifs = (clone $query)->where('statut_activation', true)->count();
 
-        $affectations = $query
-            ->join('profiles', 'profiles.id', '=', 'pointage_affectations.profil_id')
-            ->orderBy('profiles.nom')
-            ->orderBy('profiles.prenom')
-            ->select('pointage_affectations.*')
-            ->paginate(25)
-            ->withQueryString();
+        $buildAffectationsPage = function () use ($query) {
+            $affectations = (clone $query)
+                ->join('profiles', 'profiles.id', '=', 'pointage_affectations.profil_id')
+                ->orderBy('profiles.nom')
+                ->orderBy('profiles.prenom')
+                ->select('pointage_affectations.*')
+                ->paginate(25)
+                ->withQueryString();
 
-        $userIdsPage = $affectations->getCollection()
-            ->pluck('user_id')
-            ->filter()
-            ->map(fn ($id) => (int) $id)
-            ->unique()
-            ->values()
-            ->all();
-        $notesJour = PointageDeclarationCouverture::mapPourUsersJour($userIdsPage, Carbon::today());
+            $userIdsPage = $affectations->getCollection()
+                ->pluck('user_id')
+                ->filter()
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->values()
+                ->all();
+            $notesJour = PointageDeclarationCouverture::mapPourUsersJour($userIdsPage, Carbon::today());
 
-        $affectations->getCollection()->transform(function (PointageAffectation $a) use ($notesJour) {
-            $payload = PointageRhAffectationController::affectationListItemPayload($a);
-            $note = $a->user_id ? $notesJour->get((int) $a->user_id) : null;
-            if (is_array($note) && ($note['couvert'] ?? false)) {
-                $payload['note_type'] = $note['type'] ?? null;
-                $payload['note_label'] = $note['label'] ?? null;
-            } else {
-                $payload['note_type'] = null;
-                $payload['note_label'] = null;
-            }
+            $affectations->getCollection()->transform(function (PointageAffectation $a) use ($notesJour) {
+                $payload = PointageRhAffectationController::affectationListItemPayload($a);
+                $note = $a->user_id ? $notesJour->get((int) $a->user_id) : null;
+                if (is_array($note) && ($note['couvert'] ?? false)) {
+                    $payload['note_type'] = $note['type'] ?? null;
+                    $payload['note_label'] = $note['label'] ?? null;
+                } else {
+                    $payload['note_type'] = null;
+                    $payload['note_label'] = null;
+                }
 
-            return $payload;
-        });
+                return $payload;
+            });
+
+            return $affectations;
+        };
 
         return Inertia::render('Pointage/RhEmployes', [
-            'affectations' => $affectations,
+            // Différé : absent du HTML initial (data-page), chargé ensuite via XHR authentifié.
+            'affectations' => Inertia::defer($buildAffectationsPage),
             'total_enroles' => $totalEnroles,
             'total_actifs' => $totalActifs,
             'filters' => [
@@ -777,6 +782,7 @@ class PointageController extends Controller
             'mode_validation_options' => PointageRhAffectationController::modeValidationOptions(),
             'niveau_acces_options' => PointageRhAffectationController::niveauAccesOptions(),
             'profil_form' => PointageRhAffectationController::profilFormOptions($user),
+            'n1_profils' => Inertia::defer(fn () => PointageRhAffectationController::n1ProfilOptions($user)),
         ]);
     }
 

@@ -10,7 +10,7 @@ import {
 import ActionIconButton from '@/components/pointage/ActionIconButton.vue';
 import PointageLayout from '@/layouts/pointage/PointageLayout.vue';
 import type { BreadcrumbItem } from '@/types';
-import { Link, router, usePage } from '@inertiajs/vue3';
+import { Deferred, Link, router, usePage } from '@inertiajs/vue3';
 import { Eye, PauseCircle, Pencil, PlayCircle, Umbrella } from 'lucide-vue-next';
 import { computed, reactive, ref, watch } from 'vue';
 import { readCsrfTokenFromDom } from '@/lib/csrf';
@@ -65,12 +65,12 @@ type AffectationRow = {
 };
 
 const props = defineProps<{
-    affectations: {
+    affectations?: {
         data: AffectationRow[];
         links?: { url: string | null; label: string; active: boolean }[];
         current_page?: number;
         last_page?: number;
-    };
+    } | null;
     total_enroles: number;
     total_actifs: number;
     filters: { agence: string; service: string; statut: string };
@@ -89,6 +89,7 @@ const props = defineProps<{
         is_super_admin: boolean;
         next_matricule?: string;
     };
+    n1_profils?: { id: number; nom: string; prenom: string; matricule: string | null }[] | null;
 }>();
 
 const page = usePage();
@@ -1066,7 +1067,7 @@ async function definirPrincipale(a: AgenceAutorisee) {
                                 <label class="text-[10px] font-bold uppercase text-[#888780]" for="pc-n1">N+1</label>
                                 <select id="pc-n1" v-model="profilCreateForm.n_plus_1_id" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
                                     <option :value="null">— Aucun —</option>
-                                    <option v-for="p in profil_form.profils" :key="p.id" :value="p.id">{{ p.prenom }} {{ p.nom }} ({{ p.matricule }})</option>
+                                    <option v-for="p in (n1_profils ?? profil_form.profils)" :key="p.id" :value="p.id">{{ p.prenom }} {{ p.nom }} ({{ p.matricule }})</option>
                                 </select>
                             </div>
                         </div>
@@ -1505,7 +1506,13 @@ async function definirPrincipale(a: AgenceAutorisee) {
                 </div>
             </div>
 
-            <div class="overflow-hidden rounded-[10px] border border-[#e2e0d8] bg-white shadow-sm">
+            <Deferred data="affectations">
+                <template #fallback>
+                    <div class="overflow-hidden rounded-[10px] border border-[#e2e0d8] bg-white p-8 text-center text-sm text-[#888780] shadow-sm">
+                        Chargement des affectations…
+                    </div>
+                </template>
+                <div class="overflow-hidden rounded-[10px] border border-[#e2e0d8] bg-white shadow-sm">
                 <div class="overflow-x-auto">
                     <table class="w-full min-w-[900px] text-sm">
                         <thead class="border-b border-[#e2e0d8] bg-[#FAFAF8] text-left text-[10px] font-bold uppercase tracking-wide text-[#888780]">
@@ -1521,7 +1528,7 @@ async function definirPrincipale(a: AgenceAutorisee) {
                         </tr>
                     </thead>
                     <tbody>
-                            <tr v-for="a in affectations.data" :key="a.id" class="border-b border-[#F1EFE8] last:border-0 hover:bg-[#FAFAF8]/80">
+                            <tr v-for="a in (affectations?.data ?? [])" :key="a.id" class="border-b border-[#F1EFE8] last:border-0 hover:bg-[#FAFAF8]/80">
                                 <td class="px-4 py-3">
                                     <div class="font-semibold text-[#0C447C]">{{ a.prenom }} {{ a.nom }}</div>
                                     <div class="mt-0.5 text-xs text-[#888780]">{{ a.email ?? '—' }}</div>
@@ -1581,15 +1588,15 @@ async function definirPrincipale(a: AgenceAutorisee) {
                                     </div>
                                 </td>
                             </tr>
-                            <tr v-if="!affectations.data?.length">
+                            <tr v-if="!(affectations?.data?.length)">
                                 <td colspan="8" class="px-4 py-12 text-center text-[#888780]">Aucune affectation enrôlée. Cliquez sur « Enrôler ».</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
 
-                <div v-if="(affectations.last_page ?? 1) > 1 && affectations.links?.length" class="flex flex-wrap justify-center gap-1 border-t border-[#e2e0d8] px-4 py-3">
-                    <template v-for="(link, i) in affectations.links ?? []" :key="i">
+                <div v-if="(affectations?.last_page ?? 1) > 1 && affectations?.links?.length" class="flex flex-wrap justify-center gap-1 border-t border-[#e2e0d8] px-4 py-3">
+                    <template v-for="(link, i) in affectations?.links ?? []" :key="i">
                         <Link
                             v-if="link.url"
                             :href="link.url"
@@ -1611,6 +1618,7 @@ async function definirPrincipale(a: AgenceAutorisee) {
                     </template>
                 </div>
             </div>
+            </Deferred>
 
             <p class="text-center text-xs text-[#888780]">
                 Fiches collaborateur :

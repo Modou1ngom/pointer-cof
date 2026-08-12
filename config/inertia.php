@@ -49,4 +49,18 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | History encryption
+    |--------------------------------------------------------------------------
+    |
+    | Chiffre l’état d’historique du navigateur (après déconnexion, le bouton
+    | « retour » ne peut plus relire les props sensibles en clair).
+    |
+    */
+
+    'history' => [
+        'encrypt' => (bool) env('INERTIA_ENCRYPT_HISTORY', true),
+    ],
+
 ];
