@@ -29,7 +29,9 @@ class SecurityHeaders
             $response->headers->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
         }
 
-        if (config('security.csp_enabled', true)) {
+        // En local, pas de CSP : Vite HMR utilise souvent http://[::1]:5173 (IPv6),
+        // mal supporté par les host-sources CSP des navigateurs.
+        if (config('security.csp_enabled', true) && ! app()->environment('local')) {
             $response->headers->set('Content-Security-Policy', $this->csp());
         }
 
@@ -40,17 +42,18 @@ class SecurityHeaders
     {
         $isLocal = app()->environment('local');
 
+        // Vite HMR peut servir via localhost, 127.0.0.1 ou [::1] (IPv6).
         $script = $isLocal
-            ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* http://127.0.0.1:*"
+            ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* http://127.0.0.1:* http://[::1]:*"
             : "script-src 'self' 'unsafe-inline'";
 
         $connect = $isLocal
-            ? "connect-src 'self' ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:*"
+            ? "connect-src 'self' ws://localhost:* ws://127.0.0.1:* ws://[::1]:* http://localhost:* http://127.0.0.1:* http://[::1]:*"
             : "connect-src 'self'";
 
         $style = "style-src 'self' 'unsafe-inline'";
 
-        return implode('; ', [
+        $directives = [
             "default-src 'self'",
             $script,
             $style,
@@ -61,7 +64,12 @@ class SecurityHeaders
             "base-uri 'self'",
             "form-action 'self'",
             "frame-ancestors 'self'",
-            'upgrade-insecure-requests',
-        ]);
+        ];
+
+        if (! $isLocal) {
+            $directives[] = 'upgrade-insecure-requests';
+        }
+
+        return implode('; ', $directives);
     }
 }
