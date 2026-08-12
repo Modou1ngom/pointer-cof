@@ -60,8 +60,9 @@ class AppServiceProvider extends ServiceProvider
             config(['pointage.otp_email_fallback_log' => false]);
             config(['pointage.dev_unlock_code' => null]);
 
+            // Ne bloque pas artisan/vite build (wayfinder). Exigé seulement pour les requêtes HTTP.
             $jwtSecret = (string) env('POINTRUST_JWT_SECRET', '');
-            if (strlen($jwtSecret) < 32) {
+            if (strlen($jwtSecret) < 32 && ! $this->app->runningInConsole()) {
                 throw new \RuntimeException(
                     'POINTRUST_JWT_SECRET (min. 32 caractères) est obligatoire en production.'
                 );
