@@ -15,7 +15,6 @@ use App\Http\Middleware\SetFilialeContext;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
@@ -41,7 +40,8 @@ return Application::configure(basePath: dirname(__DIR__))
             SetFilialeContext::class,
             HandleAppearance::class,
             HandleInertiaRequests::class,
-            AddLinkHeadersForPreloadedAssets::class,
+            // Pas de AddLinkHeadersForPreloadedAssets : les headers Link Vite
+            // dépassent souvent le buffer Nginx (502 upstream sent too big header).
             SecurityHeaders::class,
         ]);
 
