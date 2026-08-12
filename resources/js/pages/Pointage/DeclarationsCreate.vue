@@ -21,6 +21,7 @@ const form = useForm({
     date_fin: '',
     heure_debut: '',
     heure_fin: '',
+    sens: '',
     lieu: '',
     motif: 'Permission exceptionnelle',
     commentaire: '',

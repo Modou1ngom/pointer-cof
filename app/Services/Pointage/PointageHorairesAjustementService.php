@@ -2,6 +2,9 @@
 
 namespace App\Services\Pointage;
 
+use App\Models\PointageDeclaration;
+use App\Models\User;
+use App\Support\PointageDeclarationTypes;
 use Carbon\Carbon;
 
 /**
@@ -88,16 +91,31 @@ final class PointageHorairesAjustementService
      *     heure_effective_at: Carbon,
      *     ajustement_applique: bool,
      *     plage: string|null,
+     *     allaitement?: array{sens: string, heure: string}|null,
      * }
      */
-    public function computeEffectivePunch(Carbon $clockedAt, string $type, ?string $plage = null): array
-    {
+    public function computeEffectivePunch(
+        Carbon $clockedAt,
+        string $type,
+        ?string $plage = null,
+        ?User $user = null,
+    ): array {
         $date = $clockedAt->copy()->startOfDay();
         $heureArrivee = (string) config('pointage.heure_arrivee', '08:00');
         $heureDepart = (string) config('pointage.heure_depart', '17:00');
         $heureArriveeAjustee = (string) config('pointage.heure_arrivee_ajustee', $heureArrivee);
         $heureDepartAjustee = (string) config('pointage.heure_depart_ajustee', $heureDepart);
         $toleranceMinutes = (int) config('pointage.tolerance_minutes', 10);
+
+        $allaitement = $user !== null
+            ? $this->resolveAllaitementValide((int) $user->id, $date)
+            : null;
+
+        // Allaitement entrée : l’arrivée prévue devient l’heure déclarée (ex. 09:00 → retard après 09:00 + tolérance).
+        if ($allaitement !== null && $allaitement['sens'] === 'entree' && $type === 'arrivee') {
+            $heureArrivee = $allaitement['heure'];
+            $heureArriveeAjustee = $allaitement['heure'];
+        }
 
         $limiteRetard = $date->copy()->setTimeFromTimeString($heureArrivee)->addMinutes($toleranceMinutes);
         $limiteDepart = $date->copy()->setTimeFromTimeString($heureDepart);
@@ -107,7 +125,7 @@ final class PointageHorairesAjustementService
         $heureEffective = $clockedAt->format('H:i');
 
         if ($type === 'arrivee') {
-            // Avant / dans la tolérance de 08:00 → effective = heure ajustée ; après → réelle.
+            // Avant / dans la tolérance → effective = heure ajustée ; après → réelle + retard.
             if ($clockedAt->greaterThan($limiteRetard)) {
                 $statut = 'retard';
                 $heureEffective = $clockedAt->format('H:i');
@@ -116,6 +134,28 @@ final class PointageHorairesAjustementService
                 $heureEffective = $this->formatTimeShort($heureArriveeAjustee);
             }
         } else {
+            // Allaitement sortie (ex. 16:00) : un pointage départ à partir de cette heure
+            // est ramené à l’heure de départ prévue (17:00).
+            if (
+                $allaitement !== null
+                && $allaitement['sens'] === 'sortie'
+                && $clockedAt->gte($date->copy()->setTimeFromTimeString($allaitement['heure']))
+                && $clockedAt->lt($limiteDepart)
+            ) {
+                $ajustementApplique = true;
+                $heureEffective = $this->formatTimeShort($heureDepartAjustee);
+
+                return $this->buildResult(
+                    $clockedAt,
+                    $date,
+                    $statut,
+                    $heureEffective,
+                    $ajustementApplique,
+                    $plage,
+                    $allaitement,
+                );
+            }
+
             // Symétrique à l’entrée (réf. 17:00) :
             // avant 17:00 → effective = réelle ; à partir de 17:00 → effective = heure ajustée.
             if ($clockedAt->lt($limiteDepart)) {
@@ -126,18 +166,59 @@ final class PointageHorairesAjustementService
             }
         }
 
-        $parts = explode(':', $heureEffective);
-        $h = (int) ($parts[0] ?? 0);
-        $m = (int) ($parts[1] ?? 0);
-        $heureEffectiveAt = $date->copy()->setTime($h, $m, 0);
+        return $this->buildResult(
+            $clockedAt,
+            $date,
+            $statut,
+            $heureEffective,
+            $ajustementApplique,
+            $plage,
+            $allaitement,
+        );
+    }
+
+    /**
+     * @return array{sens: string, heure: string}|null
+     */
+    public function resolveAllaitementValide(int $userId, Carbon $day): ?array
+    {
+        if ($userId <= 0) {
+            return null;
+        }
+
+        $dayStr = $day->toDateString();
+
+        $declaration = PointageDeclaration::query()
+            ->where('user_id', $userId)
+            ->where('type', 'allaitement')
+            ->where('statut', 'valide')
+            ->whereDate('date_concernee', '<=', $dayStr)
+            ->where(function ($q) use ($dayStr): void {
+                $q->whereNull('date_fin')->orWhereDate('date_fin', '>=', $dayStr);
+            })
+            ->orderByDesc('id')
+            ->first();
+
+        if ($declaration === null) {
+            return null;
+        }
+
+        $sens = PointageDeclarationTypes::allaitementSens(
+            $declaration->heure_debut !== null ? (string) $declaration->heure_debut : null,
+            $declaration->heure_fin !== null ? (string) $declaration->heure_fin : null,
+        );
+        $heure = PointageDeclarationTypes::allaitementHeure(
+            $declaration->heure_debut !== null ? (string) $declaration->heure_debut : null,
+            $declaration->heure_fin !== null ? (string) $declaration->heure_fin : null,
+        );
+
+        if ($sens === null || $heure === null) {
+            return null;
+        }
 
         return [
-            'statut' => $statut,
-            'heure_reelle' => $clockedAt->format('H:i'),
-            'heure_effective' => $heureEffective,
-            'heure_effective_at' => $heureEffectiveAt,
-            'ajustement_applique' => $ajustementApplique,
-            'plage' => $plage,
+            'sens' => $sens,
+            'heure' => $this->normalizeHhMm($heure),
         ];
     }
 
@@ -160,6 +241,43 @@ final class PointageHorairesAjustementService
             'heure_arrivee_ajustee' => (string) config('pointage.heure_arrivee_ajustee', '08:00'),
             'heure_depart_ajustee' => (string) config('pointage.heure_depart_ajustee', '17:00'),
             'tolerance_minutes' => (int) config('pointage.tolerance_minutes', 10),
+        ];
+    }
+
+    /**
+     * @param  array{sens: string, heure: string}|null  $allaitement
+     * @return array{
+     *     statut: string,
+     *     heure_reelle: string,
+     *     heure_effective: string,
+     *     heure_effective_at: Carbon,
+     *     ajustement_applique: bool,
+     *     plage: string|null,
+     *     allaitement: array{sens: string, heure: string}|null,
+     * }
+     */
+    private function buildResult(
+        Carbon $clockedAt,
+        Carbon $date,
+        string $statut,
+        string $heureEffective,
+        bool $ajustementApplique,
+        ?string $plage,
+        ?array $allaitement,
+    ): array {
+        $parts = explode(':', $heureEffective);
+        $h = (int) ($parts[0] ?? 0);
+        $m = (int) ($parts[1] ?? 0);
+        $heureEffectiveAt = $date->copy()->setTime($h, $m, 0);
+
+        return [
+            'statut' => $statut,
+            'heure_reelle' => $clockedAt->format('H:i'),
+            'heure_effective' => $heureEffective,
+            'heure_effective_at' => $heureEffectiveAt,
+            'ajustement_applique' => $ajustementApplique,
+            'plage' => $plage,
+            'allaitement' => $allaitement,
         ];
     }
 
@@ -198,6 +316,16 @@ final class PointageHorairesAjustementService
         $m = (int) ($parts[1] ?? 0);
 
         return $m > 0 ? sprintf('%d:%02d', $h, $m) : (string) $h;
+    }
+
+    private function normalizeHhMm(string $time): string
+    {
+        $clean = str_replace(['h', 'H'], ':', trim($time));
+        $parts = explode(':', $clean);
+        $h = (int) ($parts[0] ?? 0);
+        $m = (int) ($parts[1] ?? 0);
+
+        return sprintf('%02d:%02d', $h, $m);
     }
 
     private function plageArriveeDebut(): string

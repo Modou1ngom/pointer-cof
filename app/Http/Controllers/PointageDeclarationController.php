@@ -82,6 +82,7 @@ class PointageDeclarationController extends Controller
         $type = PointageDeclarationTypes::normalize((string) $request->input('type', ''));
         $request->merge(['type' => $type]);
         $validated = $request->validate(PointageDeclarationTypes::storeRules($type));
+        $validated = PointageDeclarationTypes::finalizeValidated($type, $validated);
 
         $path = null;
         if ($request->hasFile('justificatif')) {
@@ -247,6 +248,7 @@ class PointageDeclarationController extends Controller
                 'statut' => 'nullable|in:en_attente_manager,en_attente_rh,valide,rejete',
             ]
         ));
+        $validated = PointageDeclarationTypes::finalizeValidated($type, $validated);
 
         if ($request->hasFile('justificatif')) {
             $path = $request->file('justificatif')->store('pointage_declarations', 'local');
@@ -530,6 +532,14 @@ class PointageDeclarationController extends Controller
             'date_reprise_display' => $dateReprise?->format('d/m/Y'),
             'heure_debut' => $d->heure_debut,
             'heure_fin' => $d->heure_fin,
+            'sens' => PointageDeclarationTypes::allaitementSens(
+                $d->heure_debut !== null ? (string) $d->heure_debut : null,
+                $d->heure_fin !== null ? (string) $d->heure_fin : null,
+            ),
+            'heure' => PointageDeclarationTypes::allaitementHeure(
+                $d->heure_debut !== null ? (string) $d->heure_debut : null,
+                $d->heure_fin !== null ? (string) $d->heure_fin : null,
+            ),
             'lieu' => $d->lieu,
             'motif' => $d->motif,
             'commentaire' => $d->commentaire,

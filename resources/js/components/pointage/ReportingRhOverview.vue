@@ -40,6 +40,9 @@ export type ReportingDashboard = {
         permissions: number;
         permissions_pct: number;
         permissions_delta: number;
+        allaitements?: number;
+        allaitements_pct?: number;
+        allaitements_delta?: number;
         heures_sup?: string;
         heures_sup_delta?: string;
         heures_sup_delta_positive?: boolean;
@@ -104,7 +107,7 @@ const alertesDemandes = computed(() => {
             id: `demande_${item.value}`,
             label: item.label,
             count: item.count,
-            severity: item.value === 'permission_exceptionnelle' ? 'orange' : 'blue',
+            severity: item.value === 'permission_exceptionnelle' || item.value === 'allaitement' ? 'orange' : 'blue',
         }));
 });
 const alertesVisibles = computed(() =>
@@ -202,7 +205,7 @@ function alertBadgeClass(severity: string): string {
 <template>
     <div class="space-y-5">
         <!-- KPI -->
-        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-7">
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-8">
             <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
                 <div class="flex items-center gap-2">
                     <span class="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-blue-600"><Users class="h-4 w-4" /></span>
@@ -258,6 +261,14 @@ function alertBadgeClass(severity: string): string {
                 </div>
                 <div class="mt-2 text-2xl font-bold text-slate-900">{{ k.permissions ?? 0 }} <span class="text-sm font-semibold text-slate-500">({{ k.permissions_pct ?? 0 }}%)</span></div>
                 <div class="mt-1 text-xs text-slate-500">{{ (k.permissions_delta ?? 0) === 0 ? '=' : (((k.permissions_delta ?? 0) > 0 ? '+' : '') + (k.permissions_delta ?? 0)) }} vs hier</div>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
+                <div class="flex items-center gap-2">
+                    <span class="flex h-8 w-8 items-center justify-center rounded-full bg-rose-100 text-rose-700"><CalendarDays class="h-4 w-4" /></span>
+                    <span class="text-[10px] font-bold uppercase tracking-wide text-slate-400">Allaitement</span>
+                </div>
+                <div class="mt-2 text-2xl font-bold text-slate-900">{{ k.allaitements ?? 0 }} <span class="text-sm font-semibold text-slate-500">({{ k.allaitements_pct ?? 0 }}%)</span></div>
+                <div class="mt-1 text-xs text-slate-500">{{ (k.allaitements_delta ?? 0) === 0 ? '=' : (((k.allaitements_delta ?? 0) > 0 ? '+' : '') + (k.allaitements_delta ?? 0)) }} vs hier</div>
             </div>
         </div>
 

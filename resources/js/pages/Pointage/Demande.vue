@@ -26,6 +26,8 @@ interface Decl {
     date_reprise_display?: string | null;
     heure_debut?: string | null;
     heure_fin?: string | null;
+    sens?: string | null;
+    heure?: string | null;
     lieu?: string | null;
     motif: string;
     commentaire?: string | null;
@@ -180,7 +182,12 @@ function periode(d: Decl): string {
     }
     let s = d.date_concernee_display || d.date_concernee;
     if (d.heure_debut || d.heure_fin) {
-        s += ` (${[d.heure_debut, d.heure_fin].filter(Boolean).join('–')})`;
+        const sens = (d as Decl & { sens?: string | null }).sens;
+        if (d.type === 'allaitement' && sens) {
+            s += ` (${sens === 'sortie' ? 'Sortie' : 'Entrée'} ${d.heure_debut || d.heure_fin})`;
+        } else {
+            s += ` (${[d.heure_debut, d.heure_fin].filter(Boolean).join('–')})`;
+        }
     }
     return s;
 }
@@ -199,6 +206,7 @@ const editForm = useForm({
     date_fin: '',
     heure_debut: '',
     heure_fin: '',
+    sens: '',
     lieu: '',
     motif: '',
     commentaire: '',
@@ -215,8 +223,9 @@ function openEdit(d: Decl) {
     editForm.type = d.type;
     editForm.date_concernee = d.date_concernee;
     editForm.date_fin = d.date_fin || '';
-    editForm.heure_debut = d.heure_debut || '';
-    editForm.heure_fin = d.heure_fin || '';
+    editForm.heure_debut = d.heure_debut || d.heure_fin || '';
+    editForm.heure_fin = d.type === 'allaitement' ? '' : d.heure_fin || '';
+    editForm.sens = (d as Decl & { sens?: string | null }).sens || (d.heure_fin && !d.heure_debut ? 'sortie' : 'entree');
     editForm.lieu = d.lieu || '';
     editForm.motif = d.motif;
     editForm.commentaire = d.commentaire || '';
@@ -233,7 +242,8 @@ function submitEdit() {
             _method: 'put',
             date_fin: data.date_fin || null,
             heure_debut: data.heure_debut || null,
-            heure_fin: data.heure_fin || null,
+            heure_fin: data.type === 'allaitement' ? null : data.heure_fin || null,
+            sens: data.type === 'allaitement' ? data.sens || null : null,
             lieu: data.lieu || null,
             commentaire: data.commentaire || null,
         }))
@@ -569,6 +579,11 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                                     </button>
                                 </th>
                                 <th class="px-0 py-0">
+                                    <button type="button" class="w-full px-4 py-3 text-left" :class="typeHeaderClass('allaitement')" @click="setTypeFilter('allaitement')">
+                                        Allaitement
+                                    </button>
+                                </th>
+                                <th class="px-0 py-0">
                                     <button type="button" class="w-full px-4 py-3 text-left" :class="typeHeaderClass('mission')" @click="setTypeFilter('mission')">
                                         Mission
                                     </button>
@@ -672,7 +687,7 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                                 </td>
                             </tr>
                             <tr v-if="!declarations.data?.length">
-                                <td colspan="7" class="px-5 py-12 text-center text-[#888780]">Aucune déclaration pour ces filtres.</td>
+                                <td colspan="8" class="px-5 py-12 text-center text-[#888780]">Aucune déclaration pour ces filtres.</td>
                             </tr>
                         </tbody>
                     </table>
@@ -742,9 +757,16 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                             <label class="text-[11px] font-bold uppercase text-[#888780]">Heure début</label>
                             <input v-model="editForm.heure_debut" type="time" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
                         </div>
-                        <div>
+                        <div v-if="editForm.type !== 'allaitement'">
                             <label class="text-[11px] font-bold uppercase text-[#888780]">Heure fin</label>
                             <input v-model="editForm.heure_fin" type="time" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
+                        </div>
+                        <div v-else>
+                            <label class="text-[11px] font-bold uppercase text-[#888780]">Sens</label>
+                            <select v-model="editForm.sens" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
+                                <option value="entree">Entrée</option>
+                                <option value="sortie">Sortie</option>
+                            </select>
                         </div>
                     </div>
                     <div>

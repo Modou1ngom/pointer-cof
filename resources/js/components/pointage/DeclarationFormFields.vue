@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { InertiaForm } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 
 export interface DeclarationFormShape {
     type: string;
@@ -8,6 +8,7 @@ export interface DeclarationFormShape {
     date_fin: string;
     heure_debut: string;
     heure_fin: string;
+    sens: string;
     lieu: string;
     motif: string;
     commentaire: string;
@@ -21,6 +22,7 @@ const TYPES = [
     { value: 'conge_annuel', label: 'Congé annuel' },
     { value: 'conge_maladie', label: 'Congé maladie' },
     { value: 'permission_exceptionnelle', label: 'Permission exceptionnelle' },
+    { value: 'allaitement', label: 'Allaitement' },
     { value: 'mission', label: 'Mission' },
     { value: 'formation', label: 'Formation' },
     { value: 'regularisation', label: 'Régularisation' },
@@ -37,16 +39,25 @@ const MOTIFS = [
     'Formation',
     'Congé annuel',
     'Permission exceptionnelle',
+    'Allaitement',
     'Autre (préciser dans le commentaire)',
 ];
 
 const needsDateRange = computed(() =>
-    ['absence', 'conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'mission', 'formation', 'conge'].includes(
-        form.value.type,
-    ),
+    [
+        'absence',
+        'conge_annuel',
+        'conge_maladie',
+        'permission_exceptionnelle',
+        'allaitement',
+        'mission',
+        'formation',
+        'conge',
+    ].includes(form.value.type),
 );
 
 const needsHeures = computed(() => form.value.type === 'permission_exceptionnelle');
+const needsAllaitement = computed(() => form.value.type === 'allaitement');
 const needsLieu = computed(() => form.value.type === 'mission');
 
 const dateDebutLabel = computed(() => {
@@ -60,6 +71,28 @@ const dateDebutLabel = computed(() => {
 });
 
 const dateFinLabel = computed(() => (form.value.type === 'mission' ? 'Date de retour' : 'Date de fin'));
+
+const allaitementHeureLabel = computed(() =>
+    form.value.sens === 'sortie' ? 'Heure de sortie autorisée' : 'Heure d’arrivée autorisée',
+);
+
+watch(
+    () => form.value.type,
+    (type) => {
+        if (type !== 'allaitement') {
+            form.value.sens = '';
+        } else if (!form.value.sens) {
+            form.value.sens = 'entree';
+        }
+        if (type !== 'permission_exceptionnelle' && type !== 'allaitement') {
+            form.value.heure_debut = '';
+            form.value.heure_fin = '';
+        }
+        if (type === 'allaitement') {
+            form.value.heure_fin = '';
+        }
+    },
+);
 
 function onFile(e: Event) {
     const t = e.target as HTMLInputElement;
@@ -100,6 +133,30 @@ function onFile(e: Event) {
                 <label class="text-[11px] font-bold uppercase tracking-wide text-[#888780]">Heure fin</label>
                 <input v-model="form.heure_fin" type="time" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
                 <p v-if="form.errors.heure_fin" class="mt-1 text-sm text-[#A32D2D]">{{ form.errors.heure_fin }}</p>
+            </div>
+        </div>
+
+        <div v-if="needsAllaitement" class="space-y-4">
+            <p class="text-xs text-[#888780]">
+                Entrée : l’arrivée prévue devient l’heure choisie (retard après + tolérance RH). Sortie : un pointage à
+                partir de l’heure choisie est ramené à 17:00.
+            </p>
+            <div class="grid gap-4 sm:grid-cols-2">
+                <div>
+                    <label class="text-[11px] font-bold uppercase tracking-wide text-[#888780]">Sens horaire *</label>
+                    <select v-model="form.sens" class="mt-1 w-full rounded-md border border-[#e2e0d8] bg-white px-3 py-2 text-sm">
+                        <option value="entree">Entrée</option>
+                        <option value="sortie">Sortie</option>
+                    </select>
+                    <p v-if="form.errors.sens" class="mt-1 text-sm text-[#A32D2D]">{{ form.errors.sens }}</p>
+                </div>
+                <div>
+                    <label class="text-[11px] font-bold uppercase tracking-wide text-[#888780]">{{ allaitementHeureLabel }} *</label>
+                    <input v-model="form.heure_debut" type="time" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
+                    <p v-if="form.errors.heure || form.errors.heure_debut" class="mt-1 text-sm text-[#A32D2D]">
+                        {{ form.errors.heure || form.errors.heure_debut }}
+                    </p>
+                </div>
             </div>
         </div>
 

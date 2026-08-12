@@ -108,6 +108,7 @@ const congeTypes = [
     { value: 'conge_annuel', label: 'Congé annuel' },
     { value: 'conge_maladie', label: 'Congé maladie' },
     { value: 'permission_exceptionnelle', label: 'Permission exceptionnelle' },
+    { value: 'allaitement', label: 'Allaitement' },
     { value: 'mission', label: 'Mission' },
 ] as const;
 const congeForm = reactive({
@@ -116,13 +117,20 @@ const congeForm = reactive({
     date_fin: new Date().toISOString().slice(0, 10),
     heure_debut: '08:00',
     heure_fin: '17:00',
+    sens: 'entree',
     lieu: '',
     motif: 'Congé annuel',
     commentaire: '',
 });
 const congeLoading = ref(false);
 const congeNeedsHeures = computed(() => congeForm.type === 'permission_exceptionnelle');
+const congeNeedsAllaitement = computed(() => congeForm.type === 'allaitement');
 const congeNeedsLieu = computed(() => congeForm.type === 'mission');
+const congeDialogHint = computed(() =>
+    congeForm.type === 'allaitement'
+        ? '— horaire d’entrée/sortie ajusté sur la période (l’employé continue de pointer).'
+        : '— l’employé sera justifié, plus compté en absence.',
+);
 function congeTypeLabel(value: string): string {
     return congeTypes.find((t) => t.value === value)?.label ?? value;
 }
@@ -333,6 +341,8 @@ function noteBadgeClass(type: string | null | undefined): string {
             return 'bg-pink-100 text-pink-700';
         case 'permission_exceptionnelle':
             return 'bg-amber-100 text-amber-800';
+        case 'allaitement':
+            return 'bg-rose-100 text-rose-800';
         case 'mission':
             return 'bg-teal-100 text-teal-700';
         case 'formation':
@@ -640,6 +650,7 @@ function openConge(row: AffectationRow) {
     congeForm.date_fin = today;
     congeForm.heure_debut = '08:00';
     congeForm.heure_fin = '17:00';
+    congeForm.sens = 'entree';
     congeForm.lieu = '';
     congeForm.motif = 'Congé annuel';
     congeForm.commentaire = '';
@@ -651,18 +662,28 @@ function submitConge() {
         return;
     }
     congeLoading.value = true;
+    const payload: Record<string, string | null> = {
+        type: congeForm.type,
+        date_concernee: congeForm.date_concernee,
+        date_fin: congeForm.date_fin,
+        heure_debut: null,
+        heure_fin: null,
+        sens: null,
+        lieu: congeNeedsLieu.value ? congeForm.lieu : null,
+        motif: congeForm.motif,
+        commentaire: congeForm.commentaire || null,
+    };
+    if (congeNeedsHeures.value) {
+        payload.heure_debut = congeForm.heure_debut;
+        payload.heure_fin = congeForm.heure_fin;
+    }
+    if (congeNeedsAllaitement.value) {
+        payload.sens = congeForm.sens;
+        payload.heure_debut = congeForm.heure_debut;
+    }
     router.post(
         `/pointage/rh/affectations/${congeRow.value.id}/conge`,
-        {
-            type: congeForm.type,
-            date_concernee: congeForm.date_concernee,
-            date_fin: congeForm.date_fin,
-            heure_debut: congeNeedsHeures.value ? congeForm.heure_debut : null,
-            heure_fin: congeNeedsHeures.value ? congeForm.heure_fin : null,
-            lieu: congeNeedsLieu.value ? congeForm.lieu : null,
-            motif: congeForm.motif,
-            commentaire: congeForm.commentaire || null,
-        },
+        payload,
         {
             preserveScroll: true,
             onFinish: () => {
@@ -1409,7 +1430,7 @@ async function definirPrincipale(a: AgenceAutorisee) {
                         <DialogTitle>Déclarer une demande</DialogTitle>
                         <DialogDescription>
                             {{ congeRow ? `${congeRow.prenom} ${congeRow.nom}` : '' }}
-                            — l’employé sera justifié, plus compté en absence.
+                            {{ congeDialogHint }}
                         </DialogDescription>
                     </DialogHeader>
                     <form class="space-y-3 py-2" @submit.prevent="submitConge">
@@ -1442,6 +1463,21 @@ async function definirPrincipale(a: AgenceAutorisee) {
                             <div>
                                 <label class="text-[10px] font-bold uppercase text-[#888780]" for="conge-hfin">Heure de fin</label>
                                 <input id="conge-hfin" v-model="congeForm.heure_fin" type="time" required class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
+                            </div>
+                        </div>
+                        <div v-if="congeNeedsAllaitement" class="grid gap-3 sm:grid-cols-2">
+                            <div>
+                                <label class="text-[10px] font-bold uppercase text-[#888780]" for="conge-sens">Sens horaire</label>
+                                <select id="conge-sens" v-model="congeForm.sens" required class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
+                                    <option value="entree">Entrée</option>
+                                    <option value="sortie">Sortie</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-[10px] font-bold uppercase text-[#888780]" for="conge-allait-heure">
+                                    {{ congeForm.sens === 'sortie' ? 'Heure de sortie' : 'Heure d’entrée' }}
+                                </label>
+                                <input id="conge-allait-heure" v-model="congeForm.heure_debut" type="time" required class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
                             </div>
                         </div>
                         <div v-if="congeNeedsLieu">

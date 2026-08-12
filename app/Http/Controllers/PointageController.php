@@ -21,6 +21,7 @@ use App\Services\Pointage\PointageRecuperationService;
 use App\Services\PointageOtpService;
 use App\Services\PointageQrService;
 use App\Support\PointageDeclarationCouverture;
+use App\Support\PointageDeclarationTypes;
 use App\Support\PointageEnrolment;
 use App\Support\PointageGeofencing;
 use App\Support\PointageJourSemaine;
@@ -745,7 +746,11 @@ class PointageController extends Controller
                 ->unique()
                 ->values()
                 ->all();
-            $notesJour = PointageDeclarationCouverture::mapPourUsersJour($userIdsPage, Carbon::today());
+            $notesJour = PointageDeclarationCouverture::mapPourUsersJour(
+                $userIdsPage,
+                Carbon::today(),
+                PointageDeclarationTypes::TYPES_NOTES_RH,
+            );
 
             $affectations->getCollection()->transform(function (PointageAffectation $a) use ($notesJour) {
                 $payload = PointageRhAffectationController::affectationListItemPayload($a);
@@ -999,6 +1004,7 @@ class PointageController extends Controller
                 ['value' => 'conge_annuel', 'label' => 'Congé annuel'],
                 ['value' => 'conge_maladie', 'label' => 'Congé maladie'],
                 ['value' => 'permission_exceptionnelle', 'label' => 'Permission exceptionnelle'],
+                ['value' => 'allaitement', 'label' => 'Allaitement'],
                 ['value' => 'mission', 'label' => 'Mission'],
                 ['value' => 'formation', 'label' => 'Formation'],
             ],

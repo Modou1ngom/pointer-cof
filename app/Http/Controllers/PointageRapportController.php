@@ -773,6 +773,9 @@ class PointageRapportController extends Controller
                 'permissions' => $todayStats['permissions'],
                 'permissions_pct' => $pct($todayStats['permissions']),
                 'permissions_delta' => $todayStats['permissions'] - $yestStats['permissions'],
+                'allaitements' => $todayStats['allaitements'],
+                'allaitements_pct' => $pct($todayStats['allaitements']),
+                'allaitements_delta' => $todayStats['allaitements'] - $yestStats['allaitements'],
                 'heures_sup' => $this->heures->formatMinutes($heuresSupMinutes),
                 'heures_sup_delta' => $this->heures->formatMinutes($heuresSupMinutes - $prevSupMinutes),
                 'heures_sup_delta_positive' => ($heuresSupMinutes - $prevSupMinutes) >= 0,
@@ -796,6 +799,7 @@ class PointageRapportController extends Controller
                 ['value' => 'conge_annuel', 'label' => 'Congé annuel'],
                 ['value' => 'conge_maladie', 'label' => 'Congé maladie'],
                 ['value' => 'permission_exceptionnelle', 'label' => 'Permission exceptionnelle'],
+                ['value' => 'allaitement', 'label' => 'Allaitement'],
                 ['value' => 'mission', 'label' => 'Mission'],
                 ['value' => 'formation', 'label' => 'Formation'],
             ],
@@ -842,6 +846,7 @@ class PointageRapportController extends Controller
                 'retard' => $kind === 'present' && $status['is_retard'],
                 'absence' => $isOuvre && ($kind === null || $kind === 'absence'),
                 'mission' => $kind === 'mission',
+                'allaitement' => $declKind === 'allaitement',
                 'conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'formation' => $kind === $statut,
                 default => true,
             };
@@ -993,6 +998,7 @@ class PointageRapportController extends Controller
         $conges = 0;
         $missions = 0;
         $permissions = 0;
+        $allaitements = 0;
 
         foreach ($userIds as $uid) {
             /** @var Collection<int, Pointage> $items */
@@ -1003,6 +1009,10 @@ class PointageRapportController extends Controller
             );
             $declKind = $coverage[$day->toDateString()] ?? null;
             $status = $this->classifyPresenceJour($items, $declKind);
+
+            if ($declKind === 'allaitement') {
+                $allaitements++;
+            }
 
             if ($status['kind'] === 'mission') {
                 $missions++;
@@ -1035,7 +1045,7 @@ class PointageRapportController extends Controller
             $absents++;
         }
 
-        return compact('presents', 'retards', 'absents', 'conges', 'missions', 'permissions');
+        return compact('presents', 'retards', 'absents', 'conges', 'missions', 'permissions', 'allaitements');
     }
 
     /**
@@ -1086,6 +1096,7 @@ class PointageRapportController extends Controller
             'conge_annuel' => '#A855F7',
             'conge_maladie' => '#EC4899',
             'permission_exceptionnelle' => '#F59E0B',
+            'allaitement' => '#F43F5E',
             'mission' => '#14B8A6',
             'formation' => '#3B82F6',
         ];
@@ -1121,6 +1132,9 @@ class PointageRapportController extends Controller
             }
 
             $kind = $status['kind'] ?? 'absence';
+            if (($kind === null || $kind === 'absence') && $declKind === 'allaitement') {
+                $kind = 'allaitement';
+            }
             if (! isset($counts[$kind])) {
                 $kind = 'absence';
             }
@@ -1550,7 +1564,7 @@ class PointageRapportController extends Controller
         $q = PointageDeclaration::query()
             ->whereIn('user_id', $userIds ?: [0])
             ->where('statut', 'valide')
-            ->whereIn('type', PointageDeclarationTypes::TYPES_JUSTIFICATIFS_PRESENCE)
+            ->whereIn('type', PointageDeclarationTypes::TYPES_NOTES_RH)
             ->whereDate('date_concernee', '<=', $toDay);
 
         if ($hasDateFin) {
@@ -1590,6 +1604,7 @@ class PointageRapportController extends Controller
                 'conge_annuel' => 'conge_annuel',
                 'conge_maladie' => 'conge_maladie',
                 'permission_exceptionnelle' => 'permission_exceptionnelle',
+                'allaitement' => 'allaitement',
                 'formation' => 'formation',
                 'absence' => 'absence',
                 default => 'absence',

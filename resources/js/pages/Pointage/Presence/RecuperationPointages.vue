@@ -77,6 +77,7 @@ const statutTypes = computed(() => props.statut_types ?? [
     { value: 'conge_annuel', label: 'Congé annuel' },
     { value: 'conge_maladie', label: 'Congé maladie' },
     { value: 'permission_exceptionnelle', label: 'Permission exceptionnelle' },
+    { value: 'allaitement', label: 'Allaitement' },
     { value: 'mission', label: 'Mission' },
     { value: 'formation', label: 'Formation' },
 ]);

@@ -51,6 +51,7 @@ class DeclarationController extends Controller
         $type = PointageDeclarationTypes::normalize((string) $request->input('type', ''));
         $request->merge(['type' => $type]);
         $validated = $request->validate(PointageDeclarationTypes::storeRules($type));
+        $validated = PointageDeclarationTypes::finalizeValidated($type, $validated);
 
         $path = null;
         if ($request->hasFile('justificatif')) {
@@ -113,6 +114,14 @@ class DeclarationController extends Controller
             'date_fin' => $d->date_fin?->toDateString(),
             'heure_debut' => $d->heure_debut,
             'heure_fin' => $d->heure_fin,
+            'sens' => PointageDeclarationTypes::allaitementSens(
+                $d->heure_debut !== null ? (string) $d->heure_debut : null,
+                $d->heure_fin !== null ? (string) $d->heure_fin : null,
+            ),
+            'heure' => PointageDeclarationTypes::allaitementHeure(
+                $d->heure_debut !== null ? (string) $d->heure_debut : null,
+                $d->heure_fin !== null ? (string) $d->heure_fin : null,
+            ),
             'lieu' => $d->lieu,
             'motif' => $d->motif,
             'commentaire' => $d->commentaire,

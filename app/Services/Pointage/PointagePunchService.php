@@ -84,7 +84,7 @@ final class PointagePunchService
             }
         }
 
-        $effective = $this->horaires->computeEffectivePunch($clockedAt, $type, $resolved['plage'] ?? null);
+        $effective = $this->horaires->computeEffectivePunch($clockedAt, $type, $resolved['plage'] ?? null, $user);
 
         $meta = array_merge($metaExtra, [
             'heure_reelle' => $effective['heure_reelle'],
@@ -95,6 +95,9 @@ final class PointagePunchService
             'requested_type' => $resolved['requested_type'] ?? null,
             'type_auto_corrected' => $resolved['type_auto_corrected'] ?? false,
         ]);
+        if (! empty($effective['allaitement'])) {
+            $meta['allaitement'] = $effective['allaitement'];
+        }
         if ($deviceFingerprint !== null) {
             $meta['device_fingerprint'] = $deviceFingerprint;
         }

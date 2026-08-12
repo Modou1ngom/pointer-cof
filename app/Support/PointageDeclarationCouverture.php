@@ -23,17 +23,19 @@ final class PointageDeclarationCouverture
     }
 
     /**
+     * @param  list<string>|null  $types  null = justificatifs présence (absence)
      * @return array{couvert: bool, type?: string, label?: string, declaration_id?: int}
      */
-    public static function pourUserJour(int $userId, Carbon $jour): array
+    public static function pourUserJour(int $userId, Carbon $jour, ?array $types = null): array
     {
         $day = $jour->toDateString();
         $hasDateFin = self::hasDateFinColumn();
+        $types = $types ?? PointageDeclarationTypes::TYPES_JUSTIFICATIFS_PRESENCE;
 
         $d = PointageDeclaration::query()
             ->where('user_id', $userId)
             ->where('statut', 'valide')
-            ->whereIn('type', PointageDeclarationTypes::TYPES_JUSTIFICATIFS_PRESENCE)
+            ->whereIn('type', $types)
             ->where(function ($q) use ($day, $hasDateFin): void {
                 if ($hasDateFin) {
                     // Plage : début <= jour <= fin
@@ -69,16 +71,18 @@ final class PointageDeclarationCouverture
      * Prefetch pour une liste d’users / un jour (évite N+1).
      *
      * @param  list<int>  $userIds
+     * @param  list<string>|null  $types
      * @return Collection<int, array{couvert: bool, type?: string, label?: string, declaration_id?: int}>
      */
-    public static function mapPourUsersJour(array $userIds, Carbon $jour): Collection
+    public static function mapPourUsersJour(array $userIds, Carbon $jour, ?array $types = null): Collection
     {
         $day = $jour->toDateString();
         $hasDateFin = self::hasDateFinColumn();
+        $types = $types ?? PointageDeclarationTypes::TYPES_JUSTIFICATIFS_PRESENCE;
         $decls = PointageDeclaration::query()
             ->whereIn('user_id', $userIds ?: [0])
             ->where('statut', 'valide')
-            ->whereIn('type', PointageDeclarationTypes::TYPES_JUSTIFICATIFS_PRESENCE)
+            ->whereIn('type', $types)
             ->where(function ($q) use ($day, $hasDateFin): void {
                 if ($hasDateFin) {
                     $q->where(function ($w) use ($day): void {

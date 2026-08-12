@@ -372,11 +372,12 @@ class PointageRhAffectationController extends Controller
         $this->ensureCanManageUser($actor, $affectation->user);
 
         $type = PointageDeclarationTypes::normalize((string) $request->input('type', 'conge_annuel'));
-        if (! in_array($type, ['conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'mission'], true)) {
+        if (! in_array($type, ['conge_annuel', 'conge_maladie', 'permission_exceptionnelle', 'allaitement', 'mission'], true)) {
             $type = 'conge_annuel';
         }
         $request->merge(['type' => $type]);
         $validated = $request->validate(PointageDeclarationTypes::storeRules($type));
+        $validated = PointageDeclarationTypes::finalizeValidated($type, $validated);
 
         $declaration = PointageDeclaration::create([
             'user_id' => $affectation->user_id,
@@ -412,7 +413,11 @@ class PointageRhAffectationController extends Controller
             ['declaration_id' => $declaration->id, 'user_id' => $affectation->user_id]
         );
 
-        return back()->with('success', PointageDeclarationTypes::label($type).' enregistré : l’employé n’est plus compté en absence sur cette période.');
+        $success = $type === 'allaitement'
+            ? 'Allaitement enregistré : l’horaire d’entrée/sortie sera ajusté sur la période (pointage obligatoire).'
+            : PointageDeclarationTypes::label($type).' enregistré : l’employé n’est plus compté en absence sur cette période.';
+
+        return back()->with('success', $success);
     }
 
     public function retirerConge(Request $request, PointageAffectation $affectation): RedirectResponse
@@ -425,7 +430,11 @@ class PointageRhAffectationController extends Controller
         $this->ensureCanManageUser($actor, $affectation->user);
 
         $declarationId = (int) $request->input('declaration_id', 0);
-        $couverture = PointageDeclarationCouverture::pourUserJour((int) $affectation->user_id, Carbon::today());
+        $couverture = PointageDeclarationCouverture::pourUserJour(
+            (int) $affectation->user_id,
+            Carbon::today(),
+            PointageDeclarationTypes::TYPES_NOTES_RH,
+        );
 
         if ($declarationId <= 0) {
             $declarationId = (int) ($couverture['declaration_id'] ?? 0);
