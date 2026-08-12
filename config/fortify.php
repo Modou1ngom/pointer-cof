@@ -143,14 +143,16 @@ return [
     |
     */
 
-    'features' => array_values(array_filter([
-        in_array(env('APP_ENV', 'production'), ['local', 'testing'], true) ? Features::registration() : null,
+    'features' => [
+        // Toujours actif pour que Wayfinder génère @/routes/register (sinon npm run build
+        // casse en production). L’inscription réelle reste bloquée hors local (CreateNewUser).
+        Features::registration(),
         Features::resetPasswords(),
         Features::emailVerification(),
         Features::twoFactorAuthentication([
             'confirm' => true,
             'confirmPassword' => true,
         ]),
-    ])),
+    ],
 
 ];
