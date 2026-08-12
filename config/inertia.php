@@ -60,7 +60,7 @@ return [
     */
 
     'history' => [
-        'encrypt' => (bool) env('INERTIA_ENCRYPT_HISTORY', true),
+        'encrypt' => (bool) env('INERTIA_ENCRYPT_HISTORY', env('APP_ENV') === 'production'),
     ],
 
 ];

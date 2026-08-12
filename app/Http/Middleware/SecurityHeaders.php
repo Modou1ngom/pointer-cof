@@ -23,7 +23,9 @@ class SecurityHeaders
         $response->headers->remove('X-Powered-By');
         $response->headers->remove('Server');
 
-        if ($request->isSecure() || app()->environment('production')) {
+        // HSTS uniquement en production : le poser en local force le navigateur
+        // vers https://127.0.0.1 (artisan serve = HTTP only → ERR_CONNECTION_CLOSED).
+        if (app()->environment('production')) {
             $response->headers->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
         }
 
