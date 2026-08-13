@@ -657,6 +657,14 @@ function openConge(row: AffectationRow) {
     congeOpen.value = true;
 }
 
+function onCongeAllaitementSens() {
+    if (congeForm.type !== 'allaitement') {
+        return;
+    }
+    congeForm.heure_fin = '';
+    congeForm.heure_debut = congeForm.sens === 'sortie' ? '16:00' : '09:00';
+}
+
 function submitConge() {
     if (!congeRow.value) {
         return;
@@ -1440,7 +1448,13 @@ async function definirPrincipale(a: AgenceAutorisee) {
                                 id="conge-type"
                                 v-model="congeForm.type"
                                 class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm text-[#0C447C]"
-                                @change="congeForm.motif = congeTypeLabel(congeForm.type)"
+                                @change="
+                                    congeForm.motif = congeTypeLabel(congeForm.type);
+                                    if (congeForm.type === 'allaitement') {
+                                        congeForm.sens = congeForm.sens || 'entree';
+                                        onCongeAllaitementSens();
+                                    }
+                                "
                             >
                                 <option v-for="t in congeTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
                             </select>
@@ -1468,14 +1482,20 @@ async function definirPrincipale(a: AgenceAutorisee) {
                         <div v-if="congeNeedsAllaitement" class="grid gap-3 sm:grid-cols-2">
                             <div>
                                 <label class="text-[10px] font-bold uppercase text-[#888780]" for="conge-sens">Sens horaire</label>
-                                <select id="conge-sens" v-model="congeForm.sens" required class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
-                                    <option value="entree">Entrée</option>
-                                    <option value="sortie">Sortie</option>
+                                <select
+                                    id="conge-sens"
+                                    v-model="congeForm.sens"
+                                    required
+                                    class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm"
+                                    @change="onCongeAllaitementSens"
+                                >
+                                    <option value="entree">Matin</option>
+                                    <option value="sortie">Après-midi</option>
                                 </select>
                             </div>
                             <div>
                                 <label class="text-[10px] font-bold uppercase text-[#888780]" for="conge-allait-heure">
-                                    {{ congeForm.sens === 'sortie' ? 'Heure de sortie' : 'Heure d’entrée' }}
+                                    {{ congeForm.sens === 'sortie' ? 'Heure (après-midi)' : 'Heure (matin)' }}
                                 </label>
                                 <input id="conge-allait-heure" v-model="congeForm.heure_debut" type="time" required class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" />
                             </div>

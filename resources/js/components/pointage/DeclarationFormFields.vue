@@ -73,8 +73,13 @@ const dateDebutLabel = computed(() => {
 const dateFinLabel = computed(() => (form.value.type === 'mission' ? 'Date de retour' : 'Date de fin'));
 
 const allaitementHeureLabel = computed(() =>
-    form.value.sens === 'sortie' ? 'Heure de sortie autorisée' : 'Heure d’arrivée autorisée',
+    form.value.sens === 'sortie' ? 'Heure (après-midi)' : 'Heure (matin)',
 );
+
+function applyAllaitementHeureDefaults() {
+    form.value.heure_fin = '';
+    form.value.heure_debut = form.value.sens === 'sortie' ? '16:00' : '09:00';
+}
 
 watch(
     () => form.value.type,
@@ -89,8 +94,18 @@ watch(
             form.value.heure_fin = '';
         }
         if (type === 'allaitement') {
-            form.value.heure_fin = '';
+            applyAllaitementHeureDefaults();
         }
+    },
+);
+
+watch(
+    () => form.value.sens,
+    (sens) => {
+        if (form.value.type !== 'allaitement' || !sens) {
+            return;
+        }
+        applyAllaitementHeureDefaults();
     },
 );
 
@@ -137,16 +152,12 @@ function onFile(e: Event) {
         </div>
 
         <div v-if="needsAllaitement" class="space-y-4">
-            <p class="text-xs text-[#888780]">
-                Entrée : l’arrivée prévue devient l’heure choisie (retard après + tolérance RH). Sortie : un pointage à
-                partir de l’heure choisie est ramené à 17:00.
-            </p>
             <div class="grid gap-4 sm:grid-cols-2">
                 <div>
                     <label class="text-[11px] font-bold uppercase tracking-wide text-[#888780]">Sens horaire *</label>
                     <select v-model="form.sens" class="mt-1 w-full rounded-md border border-[#e2e0d8] bg-white px-3 py-2 text-sm">
-                        <option value="entree">Entrée</option>
-                        <option value="sortie">Sortie</option>
+                        <option value="entree">Matin</option>
+                        <option value="sortie">Après-midi</option>
                     </select>
                     <p v-if="form.errors.sens" class="mt-1 text-sm text-[#A32D2D]">{{ form.errors.sens }}</p>
                 </div>

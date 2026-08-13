@@ -13,11 +13,13 @@ return [
     /*
     |--------------------------------------------------------------------------
     | Durée des jetons API Sanctum (minutes).
-    | Défaut 30 jours : évite « impossible de synchroniser » après 12 h
-    | (ancien défaut 720) alors que la session locale mobile reste affichée.
+    | null / vide / 0 = illimité (recommandé mobile).
+    | Ex. 43200 = 30 jours si SECURITY_API_TOKEN_TTL_MINUTES est défini.
     |--------------------------------------------------------------------------
     */
-    'api_token_ttl_minutes' => (int) env('SECURITY_API_TOKEN_TTL_MINUTES', 43200),
+    'api_token_ttl_minutes' => (($ttl = env('SECURITY_API_TOKEN_TTL_MINUTES')) === null || $ttl === '' || (int) $ttl <= 0)
+        ? null
+        : (int) $ttl,
 
     /*
     |--------------------------------------------------------------------------

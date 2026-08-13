@@ -139,17 +139,20 @@ class AuthController extends Controller
         }
 
         $user->tokens()->delete();
-        $ttl = max(30, (int) config('security.api_token_ttl_minutes', 720));
+        $ttl = config('security.api_token_ttl_minutes');
+        $expiresAt = ($ttl === null || (int) $ttl <= 0)
+            ? null
+            : now()->addMinutes(max(30, (int) $ttl));
         $plain = $user->createToken(
             'mobile',
             ['*'],
-            now()->addMinutes($ttl),
+            $expiresAt,
         )->plainTextToken;
 
         return response()->json([
             'access_token' => $plain,
             'token_type' => 'Bearer',
-            'expires_in' => $ttl * 60,
+            'expires_in' => $expiresAt === null ? null : ((int) $ttl * 60),
             'requires_device_registration' => true,
             'requiresDeviceRegistration' => true,
             'user' => MobileApiUserResource::toArray($user, $request),

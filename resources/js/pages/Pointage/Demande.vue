@@ -184,7 +184,7 @@ function periode(d: Decl): string {
     if (d.heure_debut || d.heure_fin) {
         const sens = (d as Decl & { sens?: string | null }).sens;
         if (d.type === 'allaitement' && sens) {
-            s += ` (${sens === 'sortie' ? 'Sortie' : 'Entrée'} ${d.heure_debut || d.heure_fin})`;
+            s += ` (${sens === 'sortie' ? 'Après-midi' : 'Matin'} ${d.heure_debut || d.heure_fin})`;
         } else {
             s += ` (${[d.heure_debut, d.heure_fin].filter(Boolean).join('–')})`;
         }
@@ -232,6 +232,14 @@ function openEdit(d: Decl) {
     editForm.statut = d.statut;
     editForm.justificatif = null;
     editForm.clearErrors();
+}
+
+function onEditAllaitementSens() {
+    if (editForm.type !== 'allaitement') {
+        return;
+    }
+    editForm.heure_fin = '';
+    editForm.heure_debut = editForm.sens === 'sortie' ? '16:00' : '09:00';
 }
 
 function submitEdit() {
@@ -763,9 +771,9 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                         </div>
                         <div v-else>
                             <label class="text-[11px] font-bold uppercase text-[#888780]">Sens</label>
-                            <select v-model="editForm.sens" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm">
-                                <option value="entree">Entrée</option>
-                                <option value="sortie">Sortie</option>
+                            <select v-model="editForm.sens" class="mt-1 w-full rounded-md border border-[#e2e0d8] px-3 py-2 text-sm" @change="onEditAllaitementSens">
+                                <option value="entree">Matin</option>
+                                <option value="sortie">Après-midi</option>
                             </select>
                         </div>
                     </div>

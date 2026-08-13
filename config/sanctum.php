@@ -1,5 +1,7 @@
 <?php
 
+$sanctumTtl = env('SANCTUM_TOKEN_EXPIRATION', env('SECURITY_API_TOKEN_TTL_MINUTES'));
+
 return [
 
     'stateful' => explode(',', (string) env(
@@ -9,8 +11,13 @@ return [
 
     'guard' => ['web'],
 
-    /** Expiration des jetons personnels (minutes) — aligné sur security.api_token_ttl_minutes. */
-    'expiration' => (int) env('SANCTUM_TOKEN_EXPIRATION', env('SECURITY_API_TOKEN_TTL_MINUTES', 43200)),
+    /**
+     * Expiration globale Sanctum (minutes). null = pas d’expiration par âge.
+     * Aligné sur SECURITY_API_TOKEN_TTL_MINUTES (vide/0 = illimité).
+     */
+    'expiration' => ($sanctumTtl === null || $sanctumTtl === '' || (int) $sanctumTtl <= 0)
+        ? null
+        : (int) $sanctumTtl,
 
     'token_prefix' => env('SANCTUM_TOKEN_PREFIX', ''),
 
