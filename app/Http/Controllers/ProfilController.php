@@ -734,7 +734,18 @@ class ProfilController extends Controller
             $rules['compte_role_ids.*'] = 'integer|exists:roles,id';
         }
 
-        $validated = $request->validate($rules);
+        $validated = $request->validate($rules, [
+            'compte_password.min' => 'Le mot de passe doit contenir au moins :min caractères.',
+            'compte_password.confirmed' => 'La confirmation du mot de passe ne correspond pas.',
+            'compte_password.password.letters' => 'Le mot de passe doit contenir au moins une lettre.',
+            'compte_password.password.mixed' => 'Le mot de passe doit contenir une majuscule et une minuscule.',
+            'compte_password.password.numbers' => 'Le mot de passe doit contenir au moins un chiffre.',
+            'compte_password.password.symbols' => 'Le mot de passe doit contenir au moins un symbole.',
+            'compte_password.password.uncompromised' => 'Ce mot de passe est trop courant ou compromis. Choisissez-en un autre.',
+        ], [
+            'compte_password' => 'mot de passe',
+            'compte_password_confirmation' => 'confirmation du mot de passe',
+        ]);
 
         // Calculer automatiquement N+2 : le N+1 du N+1
         $nPlus2Id = null;

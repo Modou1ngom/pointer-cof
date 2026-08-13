@@ -41,12 +41,11 @@ class AppServiceProvider extends ServiceProvider
 
         Password::defaults(function () {
             if ($this->app->environment('production')) {
-                return Password::min(12)
+                return Password::min(10)
                     ->letters()
                     ->mixedCase()
                     ->numbers()
-                    ->symbols()
-                    ->uncompromised();
+                    ->symbols();
             }
 
             return Password::min(8);
