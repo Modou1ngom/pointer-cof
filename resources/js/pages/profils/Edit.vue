@@ -455,9 +455,6 @@ const formatTelephone = (event: Event) => {
                             :placeholder="props.compte ? 'Laisser vide pour ne pas changer' : 'Ex. Cofina@2026Secur'"
                             class="mt-1.5 border-gray-300"
                         />
-                        <p class="mt-1 text-xs text-gray-500">
-                            Au moins 10 caractères, avec majuscule, minuscule, chiffre et symbole (ex. Cofina@123).
-                        </p>
                         <InputError :message="form.errors.compte_password" />
                     </div>
                     <div v-if="props.compte || form.create_compte">
