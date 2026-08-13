@@ -9,8 +9,8 @@ return [
 
     'guard' => ['web'],
 
-    /** Expiration des jetons personnels (minutes). */
-    'expiration' => (int) env('SANCTUM_TOKEN_EXPIRATION', env('SECURITY_API_TOKEN_TTL_MINUTES', 720)),
+    /** Expiration des jetons personnels (minutes) — aligné sur security.api_token_ttl_minutes. */
+    'expiration' => (int) env('SANCTUM_TOKEN_EXPIRATION', env('SECURITY_API_TOKEN_TTL_MINUTES', 43200)),
 
     'token_prefix' => env('SANCTUM_TOKEN_PREFIX', ''),
 

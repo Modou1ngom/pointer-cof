@@ -66,18 +66,31 @@ return Application::configure(basePath: dirname(__DIR__))
             return $request->is('api/*') || $request->expectsJson();
         });
 
+        // En prod : masquer le détail des vraies erreurs 5xx uniquement.
+        // Ne jamais transformer 401 / 403 / 422 (auth, validation) en « Erreur serveur ».
         $exceptions->render(function (\Throwable $e, Request $request) {
             if (! app()->environment('production')) {
                 return null;
             }
 
-            if ($request->is('api/*') || $request->expectsJson()) {
-                $status = $e instanceof HttpExceptionInterface ? $e->getStatusCode() : 500;
-                if ($status >= 500) {
-                    return response()->json(['message' => 'Erreur serveur.'], $status);
-                }
+            if (! $request->is('api/*') && ! $request->expectsJson()) {
+                return null;
             }
 
-            return null;
+            if ($e instanceof \Illuminate\Auth\AuthenticationException
+                || $e instanceof \Illuminate\Validation\ValidationException
+                || $e instanceof \Illuminate\Auth\Access\AuthorizationException) {
+                return null;
+            }
+
+            if ($e instanceof HttpExceptionInterface) {
+                if ($e->getStatusCode() < 500) {
+                    return null;
+                }
+
+                return response()->json(['message' => 'Erreur serveur.'], $e->getStatusCode());
+            }
+
+            return response()->json(['message' => 'Erreur serveur.'], 500);
         });
     })->create();
