@@ -59,6 +59,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('profils/import', [ProfilController::class, 'import'])->name('profils.import.store')->middleware('role:admin,rh');
     Route::get('profils/export', [ProfilController::class, 'export'])->name('profils.export')->middleware('role:admin,rh');
     Route::post('profils/sync-comptes', [ProfilController::class, 'syncComptesManquants'])->name('profils.sync-comptes')->middleware('role:admin');
+    Route::post('profils/{profil}/creer-compte', [ProfilController::class, 'creerCompte'])->name('profils.creer-compte')->middleware('role:admin');
     Route::resource('profils', ProfilController::class)->middleware('role:admin,rh');
     Route::resource('roles', RoleController::class)->middleware('role:admin');
     Route::resource('departements', DepartementController::class)->middleware('role:admin');

@@ -237,6 +237,34 @@ class User extends Authenticatable
     }
 
     /**
+     * Filiales du périmètre (pivot + filiale du profil).
+     * Un super admin n’échappe pas à ce périmètre : il est super admin
+     * de sa (ses) filiale(s), pas des autres.
+     *
+     * @return list<int>
+     */
+    public function filialeIdsDuPerimetre(): array
+    {
+        $this->loadMissing('profil');
+        $ids = $this->filiales()->pluck('filiales.id')->map(fn ($id) => (int) $id)->all();
+        $profilFilialeId = $this->profil?->filiale_id;
+        if ($profilFilialeId && ! in_array((int) $profilFilialeId, $ids, true)) {
+            $ids[] = (int) $profilFilialeId;
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    public function appartientAuPerimetreFiliale(?int $filialeId): bool
+    {
+        if ($filialeId === null) {
+            return false;
+        }
+
+        return in_array($filialeId, $this->filialeIdsDuPerimetre(), true);
+    }
+
+    /**
      * Vérifie si l'utilisateur est métier
      */
     public function isMetier(): bool

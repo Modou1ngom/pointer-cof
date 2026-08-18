@@ -12,7 +12,7 @@ import PointageLayout from '@/layouts/pointage/PointageLayout.vue';
 import type { BreadcrumbItem } from '@/types';
 import { Deferred, Link, router, usePage } from '@inertiajs/vue3';
 import { Eye, PauseCircle, Pencil, PlayCircle, Umbrella } from 'lucide-vue-next';
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { readCsrfTokenFromDom } from '@/lib/csrf';
 
 type Option = { value: string; label: string };
@@ -74,7 +74,7 @@ const props = defineProps<{
     } | null;
     total_enroles: number;
     total_actifs: number;
-    filters: { agence: string; service: string; statut: string };
+    filters: { agence: string; service: string; statut: string; filiale?: string; search?: string };
     agences: string[];
     services: string[];
     horaire_display: string;
@@ -209,6 +209,24 @@ const agencesFiltrees = computed(() => {
     return props.agences_picker;
 });
 
+const agencesListeFiltrees = computed(() => {
+    const fid = props.filters.filiale;
+    if (!fid || fid === 'tous') {
+        return props.agences;
+    }
+    const allowed = new Set(
+        props.agences_picker.filter((a) => String(a.filiale_id) === String(fid)).map((a) => a.nom),
+    );
+    return props.agences.filter((nom) => allowed.has(nom));
+});
+
+onMounted(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('create') === '1') {
+        openCreation();
+    }
+});
+
 watch(selectedFiliale, (v) => {
     profilCreateForm.agence_id = null;
     profilCreateForm.filiale_id = v;
@@ -304,13 +322,17 @@ function messageFromApi(data: { message?: string; errors?: Record<string, string
     return data.message ?? 'Erreur.';
 }
 
-function applyFilters(overrides: Partial<{ agence: string; service: string; statut: string }>) {
+const searchInput = ref(props.filters.search ?? '');
+
+function applyFilters(overrides: Partial<{ agence: string; service: string; statut: string; filiale: string; search: string }>) {
     router.get(
         '/pointage/rh/employes',
         {
             agence: overrides.agence ?? props.filters.agence,
             service: overrides.service ?? props.filters.service,
             statut: overrides.statut ?? props.filters.statut,
+            filiale: overrides.filiale ?? props.filters.filiale ?? 'tous',
+            search: overrides.search ?? searchInput.value ?? props.filters.search ?? '',
         },
         { preserveState: true, preserveScroll: true, replace: true },
     );
@@ -1532,6 +1554,16 @@ async function definirPrincipale(a: AgenceAutorisee) {
                     — <span class="tabular-nums">{{ total_actifs }}</span> actif{{ total_actifs > 1 ? 's' : '' }}
                 </p>
                 <div class="flex flex-wrap items-center gap-3">
+                    <label class="sr-only" for="filtre-filiale">Filiale</label>
+                    <select
+                        id="filtre-filiale"
+                        class="rounded-md border border-[#e2e0d8] bg-white px-3 py-2 text-sm text-[#0C447C]"
+                        :value="filters.filiale ?? 'tous'"
+                        @change="applyFilters({ filiale: ($event.target as HTMLSelectElement).value, agence: 'tous' })"
+                    >
+                        <option value="tous">Toutes les filiales</option>
+                        <option v-for="f in profil_form.filiales" :key="'filiale-' + f.id" :value="String(f.id)">{{ f.nom }}</option>
+                    </select>
                     <label class="sr-only" for="filtre-statut">Statut affectation</label>
                     <select
                         id="filtre-statut"
@@ -1551,7 +1583,7 @@ async function definirPrincipale(a: AgenceAutorisee) {
                         @change="applyFilters({ agence: ($event.target as HTMLSelectElement).value })"
                     >
                         <option value="tous">Toutes les agences</option>
-                        <option v-for="s in agences" :key="'agence-' + s" :value="s">{{ s }}</option>
+                        <option v-for="s in agencesListeFiltrees" :key="'agence-' + s" :value="s">{{ s }}</option>
                     </select>
                     <label class="sr-only" for="filtre-service">Service</label>
                     <select
@@ -1563,11 +1595,20 @@ async function definirPrincipale(a: AgenceAutorisee) {
                         <option value="tous">Tous services</option>
                         <option v-for="svc in services" :key="'svc-' + svc" :value="svc">{{ svc }}</option>
                     </select>
+                    <label class="sr-only" for="filtre-search">Recherche</label>
+                    <input
+                        id="filtre-search"
+                        v-model="searchInput"
+                        type="search"
+                        placeholder="Nom, matricule, e-mail…"
+                        class="w-48 rounded-md border border-[#e2e0d8] bg-white px-3 py-2 text-sm text-[#0C447C]"
+                        @keyup.enter="applyFilters({ search: searchInput })"
+                    />
                     <button
                         type="button"
                         class="text-xs font-medium text-[#185FA5] underline"
                         title="Réaffiche tous les enrôlements si des filtres les masquent"
-                        @click="applyFilters({ agence: 'tous', service: 'tous', statut: 'tous' })"
+                        @click="searchInput = ''; applyFilters({ agence: 'tous', service: 'tous', statut: 'tous', filiale: 'tous', search: '' })"
                     >
                         Tout afficher
                     </button>

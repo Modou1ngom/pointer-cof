@@ -26,7 +26,7 @@ class ProfilsExport implements FromCollection, WithHeadings, WithMapping, WithSt
      */
     public function collection()
     {
-        return $this->query->with(['nPlus1', 'nPlus2'])->get();
+        return $this->query->with(['nPlus1', 'nPlus2', 'filiale'])->get();
     }
 
     /**
@@ -43,6 +43,7 @@ class ProfilsExport implements FromCollection, WithHeadings, WithMapping, WithSt
             'Fonction',
             'Département',
             'Site',
+            'Filiale',
             'Type de contrat',
             'Statut',
             'N+1 (Nom Prénom)',
@@ -69,6 +70,7 @@ class ProfilsExport implements FromCollection, WithHeadings, WithMapping, WithSt
             $profil->fonction ?? '',
             $profil->departement ?? '',
             $profil->site ?? '',
+            $profil->filiale?->nom ?? '',
             $profil->type_contrat ?? '',
             $profil->statut ?? '',
             $profil->nPlus1 ? ($profil->nPlus1->prenom . ' ' . $profil->nPlus1->nom) : '',

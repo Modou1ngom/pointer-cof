@@ -14,7 +14,17 @@ class FilialeController extends Controller
      */
     public function index()
     {
-        $filiales = Filiale::orderBy('nom')->get();
+        $user = auth()->user();
+        $query = Filiale::query()->orderBy('nom');
+        if ($user) {
+            $ids = $user->filialeIdsDuPerimetre();
+            if ($ids !== []) {
+                $query->whereIn('id', $ids);
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        }
+        $filiales = $query->get();
         
         // Compter le nombre de profils par filiale
         $filiales->each(function ($filiale) {
@@ -60,7 +70,8 @@ class FilialeController extends Controller
      */
     public function show(Filiale $filiale)
     {
-        $profils = Profil::where('site', $filiale->nom)->get();
+        $this->authorizeFiliale($filiale);
+        $profils = Profil::where('filiale_id', $filiale->id)->get();
         
         return Inertia::render('filiales/Show', [
             'filiale' => $filiale,
@@ -73,6 +84,7 @@ class FilialeController extends Controller
      */
     public function edit(Filiale $filiale)
     {
+        $this->authorizeFiliale($filiale);
         return Inertia::render('filiales/Edit', [
             'filiale' => $filiale,
         ]);
@@ -83,6 +95,7 @@ class FilialeController extends Controller
      */
     public function update(Request $request, Filiale $filiale)
     {
+        $this->authorizeFiliale($filiale);
         $validated = $request->validate([
             'nom' => 'required|string|max:255|unique:filiales,nom,' . $filiale->id,
             'description' => 'nullable|string',
@@ -104,9 +117,18 @@ class FilialeController extends Controller
      */
     public function destroy(Filiale $filiale)
     {
+        $this->authorizeFiliale($filiale);
         $filiale->delete();
         
         return redirect()->route('filiales.index')
             ->with('success', 'Filiale supprimée avec succès !');
+    }
+
+    private function authorizeFiliale(Filiale $filiale): void
+    {
+        $user = auth()->user();
+        if (! $user || ! $user->appartientAuPerimetreFiliale((int) $filiale->id)) {
+            abort(403, 'Vous n’avez pas accès à cette filiale.');
+        }
     }
 }

@@ -25,10 +25,12 @@ class PointageSiteController extends Controller
             ->with(['filiale:id,nom'])
             ->orderBy('nom');
 
-        if ($user && ! $user->isSuperAdmin()) {
-            $ids = $user->filiales()->pluck('filiales.id')->all();
-            if (! empty($ids)) {
+        if ($user) {
+            $ids = $user->filialeIdsDuPerimetre();
+            if ($ids !== []) {
                 $query->whereIn('filiale_id', $ids);
+            } else {
+                $query->whereRaw('1 = 0');
             }
         }
 
@@ -524,11 +526,11 @@ class PointageSiteController extends Controller
         }
 
         $query = Agence::query()->with(['filiale:id,nom']);
-        if (! $user->isSuperAdmin()) {
-            $ids = $user->filiales()->pluck('filiales.id')->all();
-            if ($ids !== []) {
-                $query->whereIn('filiale_id', $ids);
-            }
+        $ids = $user->filialeIdsDuPerimetre();
+        if ($ids !== []) {
+            $query->whereIn('filiale_id', $ids);
+        } else {
+            $query->whereRaw('1 = 0');
         }
 
         $agence = $query->where(function ($q) use ($code) {
@@ -656,19 +658,11 @@ class PointageSiteController extends Controller
         if (! $user) {
             return false;
         }
-        if ($user->isSuperAdmin()) {
-            return true;
-        }
-        if (! ($user->isRh() || $user->isAdmin())) {
+        if (! ($user->isRh() || $user->isAdmin() || $user->isSuperAdmin())) {
             return false;
         }
-        $ids = $user->filiales()->pluck('filiales.id')->all();
-        if ($ids === []) {
-            return true;
-        }
 
-        return $agence->filiale_id !== null
-            && in_array((int) $agence->filiale_id, array_map('intval', $ids), true);
+        return $user->appartientAuPerimetreFiliale($agence->filiale_id ? (int) $agence->filiale_id : null);
     }
 
     /**

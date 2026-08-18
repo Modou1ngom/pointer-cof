@@ -137,13 +137,12 @@ class PointageRhAffectationController extends Controller
                 }
             }
         }
-        if (! $filialeId && ! $actor->isSuperAdmin()) {
-            $userFiliales = $actor->filiales()->get();
-            if ($userFiliales->count() > 0) {
-                $filialeId = $userFiliales->first()->id;
-            } elseif ($actor->profil?->filiale_id) {
-                $filialeId = $actor->profil->filiale_id;
-            }
+        if (! $filialeId) {
+            $ids = $actor->filialeIdsDuPerimetre();
+            $filialeId = $ids[0] ?? null;
+        }
+        if ($filialeId && ! $actor->appartientAuPerimetreFiliale((int) $filialeId)) {
+            return response()->json(['ok' => false, 'message' => 'Filiale hors de votre périmètre.'], 403);
         }
 
         $email = mb_strtolower(trim($validated['email']));
@@ -770,22 +769,21 @@ class PointageRhAffectationController extends Controller
      */
     public static function profilFormOptions(User $actor): array
     {
-        $userFilialeId = null;
-        if (! $actor->isSuperAdmin()) {
-            $userFiliales = $actor->filiales()->get();
-            if ($userFiliales->count() > 0) {
-                $userFilialeId = $userFiliales->first()->id;
-            } elseif ($actor->profil?->filiale_id) {
-                $userFilialeId = $actor->profil->filiale_id;
-            }
+        $ids = $actor->filialeIdsDuPerimetre();
+        $userFilialeId = $ids[0] ?? null;
+        $filialesQuery = Filiale::query()->where('actif', true)->orderBy('nom');
+        if ($ids !== []) {
+            $filialesQuery->whereIn('id', $ids);
+        } else {
+            $filialesQuery->whereRaw('1 = 0');
         }
 
         return [
             'departements' => Departement::query()->where('actif', true)->orderBy('nom')->get(['id', 'nom']),
             'profils' => [],
-            'filiales' => Filiale::query()->where('actif', true)->orderBy('nom')->get(['id', 'nom']),
+            'filiales' => $filialesQuery->get(['id', 'nom']),
             'user_filiale_id' => $userFilialeId,
-            'is_super_admin' => $actor->isSuperAdmin(),
+            'is_super_admin' => count($ids) > 1,
             'next_matricule' => Profil::generateMatricule(),
         ];
     }
@@ -798,16 +796,11 @@ class PointageRhAffectationController extends Controller
     public static function n1ProfilOptions(User $actor): array
     {
         $profilsQuery = Profil::query()->orderBy('nom')->orderBy('prenom');
-        if (! $actor->isSuperAdmin()) {
-            $filialeIds = $actor->filiales()->pluck('filiales.id')->all();
-            if ($actor->profil?->filiale_id && ! in_array((int) $actor->profil->filiale_id, array_map('intval', $filialeIds), true)) {
-                $filialeIds[] = (int) $actor->profil->filiale_id;
-            }
-            if ($filialeIds !== []) {
-                $profilsQuery->whereIn('filiale_id', $filialeIds);
-            } else {
-                $profilsQuery->whereRaw('1 = 0');
-            }
+        $filialeIds = $actor->filialeIdsDuPerimetre();
+        if ($filialeIds !== []) {
+            $profilsQuery->whereIn('filiale_id', $filialeIds);
+        } else {
+            $profilsQuery->whereRaw('1 = 0');
         }
 
         return $profilsQuery
@@ -830,12 +823,11 @@ class PointageRhAffectationController extends Controller
     public static function agencesPickerForActor(User $actor)
     {
         $q = Agence::query()->where('actif', true)->orderBy('nom');
-        if ($actor->isSuperAdmin() || $actor->isAdmin()) {
-            return $q->get(['id', 'nom', 'code_agent', 'filiale_id']);
-        }
-        $ids = $actor->filiales()->pluck('filiales.id')->all();
+        $ids = $actor->filialeIdsDuPerimetre();
         if ($ids !== []) {
             $q->whereIn('filiale_id', $ids);
+        } else {
+            $q->whereRaw('1 = 0');
         }
 
         return $q->get(['id', 'nom', 'code_agent', 'filiale_id']);
@@ -859,11 +851,7 @@ class PointageRhAffectationController extends Controller
 
     private function ensureAgenceAssignable(User $actor, Agence $agence): void
     {
-        if ($actor->isAdmin() || $actor->isSuperAdmin()) {
-            return;
-        }
-        $ids = $actor->filiales()->pluck('filiales.id')->all();
-        if ($ids === [] || $agence->filiale_id === null || ! in_array((int) $agence->filiale_id, array_map('intval', $ids), true)) {
+        if ($agence->filiale_id === null || ! $actor->appartientAuPerimetreFiliale((int) $agence->filiale_id)) {
             abort(403, 'Agence hors de votre périmètre.');
         }
     }

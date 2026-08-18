@@ -23,13 +23,11 @@ class AgenceController extends Controller
 
         $query = Agence::query()->with('filiale:id,nom');
 
-        $filialeIds = $this->allowedFilialeIdsForUser($user);
-        if ($filialeIds !== null) {
-            if ($filialeIds === []) {
-                $query->whereRaw('1 = 0');
-            } else {
-                $query->whereIn('filiale_id', $filialeIds);
-            }
+        $ids = $this->allowedFilialeIdsForUser($user);
+        if ($ids === []) {
+            $query->whereRaw('1 = 0');
+        } else {
+            $query->whereIn('filiale_id', $ids);
         }
 
         $agences = $query->orderBy('nom')->paginate($perPage);
@@ -159,22 +157,15 @@ class AgenceController extends Controller
      * @return array{latitude: float|null, longitude: float|null}
      */
     /**
-     * @return list<int>|null null = toutes les filiales (super admin)
+     * @return list<int>
      */
-    private function allowedFilialeIdsForUser(?User $user): ?array
+    private function allowedFilialeIdsForUser(?User $user): array
     {
-        if (! $user || $user->isSuperAdmin()) {
-            return null;
+        if (! $user) {
+            return [];
         }
 
-        $ids = $user->filiales()->pluck('filiales.id')->map(fn ($id) => (int) $id)->all();
-
-        $profilFilialeId = $user->profil?->filiale_id;
-        if ($profilFilialeId && ! in_array((int) $profilFilialeId, $ids, true)) {
-            $ids[] = (int) $profilFilialeId;
-        }
-
-        return array_values(array_unique($ids));
+        return $user->filialeIdsDuPerimetre();
     }
 
     /**
@@ -185,12 +176,10 @@ class AgenceController extends Controller
         $query = Filiale::query()->where('actif', true)->orderBy('nom');
 
         $ids = $this->allowedFilialeIdsForUser($user);
-        if ($ids !== null) {
-            if ($ids === []) {
-                return collect();
-            }
-            $query->whereIn('id', $ids);
+        if ($ids === []) {
+            return collect();
         }
+        $query->whereIn('id', $ids);
 
         return $query->get(['id', 'nom']);
     }
@@ -198,7 +187,7 @@ class AgenceController extends Controller
     private function defaultFilialeIdForUser(?User $user): ?int
     {
         $ids = $this->allowedFilialeIdsForUser($user);
-        if ($ids === null || count($ids) !== 1) {
+        if (count($ids) !== 1) {
             return null;
         }
 
@@ -221,10 +210,6 @@ class AgenceController extends Controller
     {
         $user = Auth::user();
         $allowed = $this->allowedFilialeIdsForUser($user);
-        if ($allowed === null) {
-            return;
-        }
-
         if ($agence->filiale_id === null || in_array((int) $agence->filiale_id, $allowed, true)) {
             return;
         }
@@ -240,10 +225,7 @@ class AgenceController extends Controller
         $user = Auth::user();
         $allowedFilialeIds = $this->allowedFilialeIdsForUser($user);
 
-        $filialeRules = ['nullable', 'exists:filiales,id'];
-        if ($allowedFilialeIds !== null) {
-            $filialeRules[] = Rule::in($allowedFilialeIds);
-        }
+        $filialeRules = ['nullable', 'exists:filiales,id', Rule::in($allowedFilialeIds)];
 
         $uniqueAgenceRule = function (string $column) use ($user, $allowedFilialeIds, $agence) {
             return function (string $attribute, mixed $value, \Closure $fail) use ($column, $user, $allowedFilialeIds, $agence) {
@@ -261,8 +243,7 @@ class AgenceController extends Controller
                     return;
                 }
 
-                if ($user && ! $user->isSuperAdmin() && $allowedFilialeIds !== null
-                    && ! in_array((int) $existing->filiale_id, $allowedFilialeIds, true)) {
+                if ($user && ! in_array((int) $existing->filiale_id, $allowedFilialeIds, true)) {
                     $filialeLabel = $existing->filiale?->nom
                         ?? Filiale::query()->whereKey($existing->filiale_id)->value('nom')
                         ?? 'autre filiale';

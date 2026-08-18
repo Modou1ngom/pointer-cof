@@ -55,11 +55,25 @@ const submit = () => {
 
 const downloadTemplate = () => {
     // Créer un fichier Excel exemple (CSV pour simplifier)
-    const headers = ['Nom', 'Prénom', 'Email', 'Téléphone', 'Fonction', 'Département', 'Site', 'Type Contrat', 'Statut', 'Back/Front Office'];
-    const csvContent = headers.join(',') + '\n' + 
-        'Dupont,Jean,jean.dupont@example.com,+221771234567,Directeur,IT,Dakar,CDI,actif,Back Office\n' +
-        'Martin,Marie,marie.martin@example.com,+221771234568,Manager,Finance,Dakar,CDI,actif,Front Office';
-    
+    const headers = [
+        'Nom',
+        'Prénom',
+        'Email',
+        'Téléphone',
+        'Fonction',
+        'Département',
+        'Site',
+        'Filiale',
+        'Type Contrat',
+        'Statut',
+        'Back/Front Office',
+    ];
+    const csvContent =
+        headers.join(',') +
+        '\n' +
+        'Dupont,Jean,jean.dupont@example.com,+221771234567,Directeur,IT,Dakar,Sénégal,CDI,actif,Back Office\n' +
+        'Martin,Marie,marie.martin@example.com,+221771234568,Manager,Finance,Abidjan,Côte d\'Ivoire,CDI,actif,Front Office';
+
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
@@ -96,7 +110,8 @@ const downloadTemplate = () => {
                             <li>Le fichier doit être au format Excel (.xlsx ou .xls)</li>
                             <li>La première ligne doit contenir les en-têtes de colonnes</li>
                             <li>Les colonnes obligatoires sont : <strong>Nom</strong> et <strong>Prénom</strong></li>
-                            <li>Les colonnes optionnelles sont : <strong>Matricule</strong>, Email, Téléphone, Fonction, Département, Site, Type Contrat, Statut, Back/Front Office</li>
+                            <li>Les colonnes optionnelles sont : <strong>Matricule</strong>, Email, Téléphone, Fonction, Département, Site, <strong>Filiale</strong>, Type Contrat, Statut, Back/Front Office</li>
+                            <li>Si <strong>Filiale</strong> est renseignée, le profil y est rattaché (créée si absente). Sinon : filiale « Sénégal » par défaut.</li>
                           <!--  <li>Si le matricule est fourni dans le fichier, il sera utilisé. Sinon, il sera généré automatiquement (M1, M2, M3...)</li>-->
                             <li>Les lignes avec des matricules ou emails déjà existants seront ignorées</li>
                         </ul>

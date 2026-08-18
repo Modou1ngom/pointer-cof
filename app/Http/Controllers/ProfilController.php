@@ -27,26 +27,16 @@ class ProfilController extends Controller
      */
     private function applyFilialeFilter($query, $user)
     {
-        $isSuperAdmin = $user && $user->isSuperAdmin();
-        $isAdmin = $user && $user->isAdmin();
-        $isRh = $user && $user->isRh();
-
-        // Super admin voit tous les profils
-        if ($isSuperAdmin) {
-            return $query;
-        }
-        // Admin normal et RH voient uniquement les profils de leurs filiales assignées
-        elseif (($isAdmin || $isRh) && $user) {
-            $userFilialesIds = $user->filiales()->get()->pluck('id')->toArray();
-            if (! empty($userFilialesIds)) {
-                return $query->whereIn('filiale_id', $userFilialesIds);
-            } else {
-                // Si l'admin/RH n'a aucune filiale assignée, il ne voit rien
-                return $query->where('id', 0);
-            }
+        if (! $user) {
+            return $query->where('id', 0);
         }
 
-        return $query;
+        $ids = $user->filialeIdsDuPerimetre();
+        if ($ids === []) {
+            return $query->where('id', 0);
+        }
+
+        return $query->whereIn('filiale_id', $ids);
     }
 
     /**
@@ -54,47 +44,17 @@ class ProfilController extends Controller
      */
     private function filterAgencesByFiliale($user)
     {
-        $isSuperAdmin = $user && $user->isSuperAdmin();
-        $isAdmin = $user && $user->isAdmin();
-        $isRh = $user && $user->isRh();
-
         $query = Agence::where('actif', true);
-
-        // Super admin voit toutes les agences
-        if ($isSuperAdmin) {
-            return $query;
-        }
-        // Admin normal et RH voient uniquement les agences de leurs filiales assignées
-        elseif (($isAdmin || $isRh) && $user) {
-            $userFilialesIds = $user->filiales()->get()->pluck('id')->toArray();
-            if (! empty($userFilialesIds)) {
-                return $query->whereIn('filiale_id', $userFilialesIds);
-            } else {
-                // Si l'admin/RH n'a aucune filiale assignée, il ne voit rien
-                return $query->where('id', 0);
-            }
-        }
-        // Les autres utilisateurs voient les agences de leurs filiales assignées ou de leur profil
-        elseif ($user) {
-            $userFilialesIds = $user->filiales()->get()->pluck('id')->toArray();
-            $userProfil = $user->profil;
-
-            // Si l'utilisateur a un profil avec une filiale_id, l'ajouter aussi
-            if ($userProfil && $userProfil->filiale_id) {
-                if (! in_array($userProfil->filiale_id, $userFilialesIds)) {
-                    $userFilialesIds[] = $userProfil->filiale_id;
-                }
-            }
-
-            if (! empty($userFilialesIds)) {
-                return $query->whereIn('filiale_id', $userFilialesIds);
-            } else {
-                // Si l'utilisateur n'a aucune filiale assignée, il ne voit rien
-                return $query->where('id', 0);
-            }
+        if (! $user) {
+            return $query->where('id', 0);
         }
 
-        return $query->where('id', 0);
+        $ids = $user->filialeIdsDuPerimetre();
+        if ($ids === []) {
+            return $query->where('id', 0);
+        }
+
+        return $query->whereIn('filiale_id', $ids);
     }
 
     /**
@@ -106,43 +66,11 @@ class ProfilController extends Controller
             return false;
         }
 
-        $isSuperAdmin = $user->isSuperAdmin();
-
-        // Super admin peut accéder à tous les profils
-        if ($isSuperAdmin) {
+        if ($user->appartientAuPerimetreFiliale($profil->filiale_id ? (int) $profil->filiale_id : null)) {
             return true;
         }
 
-        $isAdmin = $user->isAdmin();
-        $isRh = $user->isRh();
-
-        // Admin normal et RH peuvent accéder uniquement aux profils de leurs filiales assignées
-        if (($isAdmin || $isRh)) {
-            $userFilialesIds = $user->filiales()->get()->pluck('id')->toArray();
-            if (! empty($userFilialesIds) && $profil->filiale_id) {
-                return in_array($profil->filiale_id, $userFilialesIds);
-            }
-
-            return false;
-        }
-
-        // Pour les autres utilisateurs, vérifier leurs filiales assignées ou leur profil
-        $userFilialesIds = $user->filiales()->get()->pluck('id')->toArray();
         $userProfil = $user->profil;
-
-        // Si l'utilisateur a un profil avec une filiale_id, l'ajouter aussi
-        if ($userProfil && $userProfil->filiale_id) {
-            if (! in_array($userProfil->filiale_id, $userFilialesIds)) {
-                $userFilialesIds[] = $userProfil->filiale_id;
-            }
-        }
-
-        // Si l'utilisateur a des filiales assignées, vérifier si le profil appartient à une de ces filiales
-        if (! empty($userFilialesIds) && $profil->filiale_id) {
-            return in_array($profil->filiale_id, $userFilialesIds);
-        }
-
-        // Sinon, vérifier s'ils peuvent voir leur propre profil ou leurs subordonnés
         if ($userProfil) {
             return $profil->id === $userProfil->id || $profil->n_plus_1_id === $userProfil->id;
         }
@@ -160,73 +88,15 @@ class ProfilController extends Controller
 
         // Construire la requête de base
         $query = Profil::query();
+        $userFilialesIds = $user ? $user->filialeIdsDuPerimetre() : [];
 
-        // Distinguer super admin, admin normal et RH
-        $isSuperAdmin = $user && $user->isSuperAdmin();
-        $isAdmin = $user && $user->isAdmin();
-        $isRh = $user && $user->isRh();
-
-        // Super admin voit tous les profils
-        if ($isSuperAdmin) {
-            // Pas de restriction pour le super admin
-        }
-        // Admin normal voit uniquement les profils de ses filiales assignées
-        elseif ($isAdmin && $user) {
-            $userFilialesIds = $user->filiales()->get()->pluck('id')->toArray();
-
-            // Si l'admin a un profil avec une filiale_id, l'ajouter aussi
-            $userProfil = $user->profil;
-            if ($userProfil && $userProfil->filiale_id) {
-                if (! in_array($userProfil->filiale_id, $userFilialesIds)) {
-                    $userFilialesIds[] = $userProfil->filiale_id;
-                }
-            }
-
-            if (! empty($userFilialesIds)) {
-                $query->whereIn('filiale_id', $userFilialesIds);
-            } else {
-                // Si l'admin n'a aucune filiale assignée, il ne voit rien
-                $query->where('id', 0);
-            }
-        }
-        // RH voit uniquement les profils de ses filiales assignées (si applicable)
-        elseif ($isRh && $user) {
-            $userFilialesIds = $user->filiales()->get()->pluck('id')->toArray();
-
-            // Si le RH a un profil avec une filiale_id, l'ajouter aussi
-            $userProfil = $user->profil;
-            if ($userProfil && $userProfil->filiale_id) {
-                if (! in_array($userProfil->filiale_id, $userFilialesIds)) {
-                    $userFilialesIds[] = $userProfil->filiale_id;
-                }
-            }
-
-            if (! empty($userFilialesIds)) {
-                $query->whereIn('filiale_id', $userFilialesIds);
-            } else {
-                // Si le RH n'a aucune filiale assignée, il ne voit rien
-                $query->where('id', 0);
-            }
-        }
-        // Les autres utilisateurs
-        else {
+        if ($userFilialesIds !== []) {
+            $query->whereIn('filiale_id', $userFilialesIds);
+        } elseif ($user && ($user->isAdmin() || $user->isRh() || $user->isSuperAdmin())) {
+            $query->where('id', 0);
+        } else {
             $profil = $user?->profil;
-
-            // Vérifier d'abord si l'utilisateur a des filiales assignées
-            $userFilialesIds = $user ? $user->filiales()->get()->pluck('id')->toArray() : [];
-
-            // Si l'utilisateur a un profil avec une filiale_id, l'ajouter aussi
-            if ($profil && $profil->filiale_id) {
-                if (! in_array($profil->filiale_id, $userFilialesIds)) {
-                    $userFilialesIds[] = $profil->filiale_id;
-                }
-            }
-
-            if (! empty($userFilialesIds)) {
-                // L'utilisateur voit les profils de ses filiales assignées
-                $query->whereIn('filiale_id', $userFilialesIds);
-            } elseif ($profil) {
-                // Sinon, il voit uniquement son propre profil et ses subordonnés
+            if ($profil) {
                 $query->where(function ($q) use ($profil) {
                     $q->where('id', $profil->id)
                         ->orWhere('n_plus_1_id', $profil->id);
@@ -235,6 +105,10 @@ class ProfilController extends Controller
                 $query->where('id', 0);
             }
         }
+
+        $isSuperAdmin = $user && $user->isSuperAdmin();
+        $isAdmin = $user && $user->isAdmin();
+        $isRh = $user && $user->isRh();
 
         // Filtre par statut
         if ($request->has('statut') && $request->statut !== '') {
@@ -260,6 +134,11 @@ class ProfilController extends Controller
             if ($agence) {
                 $query->where('site', $agence->nom);
             }
+        }
+
+        // Filtre par filiale
+        if ($request->filled('filiale')) {
+            $query->where('filiale_id', (int) $request->filiale);
         }
 
         // Filtre par type de contrat
@@ -291,11 +170,20 @@ class ProfilController extends Controller
         $agencesQuery = $this->filterAgencesByFiliale($user);
         $agences = $agencesQuery->orderBy('nom')->get(['id', 'nom']);
         $roles = Role::where('actif', true)->orderBy('nom')->get(['id', 'nom']);
+        $filialesQuery = Filiale::where('actif', true)->orderBy('nom');
+        $filialeIds = $user ? $user->filialeIdsDuPerimetre() : [];
+        if ($filialeIds !== []) {
+            $filialesQuery->whereIn('id', $filialeIds);
+        } else {
+            $filialesQuery->whereRaw('1 = 0');
+        }
+        $filiales = $filialesQuery->get(['id', 'nom']);
 
         return Inertia::render('profils/Index', [
             'profils' => $profils,
             'departements' => $departements,
             'agences' => $agences,
+            'filiales' => $filiales,
             'roles' => $roles,
             'canManageComptes' => (bool) ($user && ($isSuperAdmin || ($isAdmin && ! $isRh))),
         ]);
@@ -570,26 +458,14 @@ class ProfilController extends Controller
                 }
             }
 
-            // 2. Pour les admins et RH, utiliser leur filiale assignée
-            $isSuperAdmin = $user && $user->isSuperAdmin();
-            $isAdmin = $user && $user->isAdmin();
-            $isRh = $user && $user->isRh();
-
-            if (! $filialeId && ($isAdmin || $isRh) && ! $isSuperAdmin) {
-                $userFiliales = $user->filiales()->get();
-                if ($userFiliales->count() > 0) {
-                    // Prendre la première filiale assignée
-                    $filialeId = $userFiliales->first()->id;
-                } elseif ($user->profil && $user->profil->filiale_id) {
-                    // Sinon, utiliser la filiale du profil
-                    $filialeId = $user->profil->filiale_id;
-                }
+            if (! $filialeId && $user) {
+                $ids = $user->filialeIdsDuPerimetre();
+                $filialeId = $ids[0] ?? null;
             }
+        }
 
-            // 3. Pour les autres utilisateurs, utiliser la filiale de leur profil
-            if (! $filialeId && $user && $user->profil && $user->profil->filiale_id) {
-                $filialeId = $user->profil->filiale_id;
-            }
+        if ($user && $filialeId && ! $user->appartientAuPerimetreFiliale((int) $filialeId)) {
+            abort(403, 'Vous ne pouvez pas créer un profil hors de votre filiale.');
         }
 
         $data = [
@@ -667,7 +543,14 @@ class ProfilController extends Controller
             ->get(['id', 'nom', 'responsable_departement_id']);
         $agencesQuery = $this->filterAgencesByFiliale($user);
         $agences = $agencesQuery->orderBy('nom')->get(['id', 'nom', 'filiale_id']);
-        $filiales = Filiale::where('actif', true)->orderBy('nom')->get(['id', 'nom']);
+        $filialesQuery = Filiale::where('actif', true)->orderBy('nom');
+        $ids = $user ? $user->filialeIdsDuPerimetre() : [];
+        if ($ids !== []) {
+            $filialesQuery->whereIn('id', $ids);
+        } else {
+            $filialesQuery->whereRaw('1 = 0');
+        }
+        $filiales = $filialesQuery->get(['id', 'nom']);
         $compteUser = $this->findCompteForProfil($profil);
         if ($compteUser !== null) {
             $compteUser->load(['roles:id,nom']);
@@ -861,19 +744,81 @@ class ProfilController extends Controller
         $query = $this->applyFilialeFilter($query, $actor);
 
         $created = 0;
+        $errors = 0;
         foreach ($query->get() as $profil) {
             if ($this->findCompteForProfil($profil) !== null) {
                 continue;
             }
-            if ($this->syncCompteForProfil($profil, null, $profil->statut === 'actif', true, true) !== null) {
-                $created++;
+            try {
+                if ($this->syncCompteForProfil($profil, null, $profil->statut === 'actif', true, true) !== null) {
+                    $created++;
+                }
+            } catch (\Throwable $e) {
+                $errors++;
+                Log::warning('Création compte manquant impossible', [
+                    'profil_id' => $profil->id,
+                    'email' => $profil->email,
+                    'error' => $e->getMessage(),
+                ]);
             }
         }
 
+        if ($created > 0) {
+            $msg = "{$created} compte(s) utilisateur créé(s) pour les profils importés.";
+            if ($errors > 0) {
+                $msg .= " {$errors} échec(s).";
+            }
+
+            return redirect()->route('profils.index')->with('success', $msg);
+        }
+
+        if ($errors > 0) {
+            return redirect()->route('profils.index')
+                ->with('error', "Aucun compte créé ({$errors} erreur(s)). Vérifiez les e-mails / matricules déjà utilisés.");
+        }
+
         return redirect()->route('profils.index')
-            ->with('success', $created > 0
-                ? "{$created} compte(s) utilisateur créé(s) pour les profils importés."
-                : 'Tous les profils avec e-mail ont déjà un compte.');
+            ->with('success', 'Tous les profils avec e-mail ont déjà un compte.');
+    }
+
+    /**
+     * Crée le compte utilisateur d’un profil sans compte.
+     */
+    public function creerCompte(Profil $profil)
+    {
+        $actor = Auth::user();
+        abort_unless($actor && ($actor->isSuperAdmin() || ($actor->isAdmin() && ! $actor->isRh())), 403);
+
+        if (! $this->canAccessProfil($profil, $actor)) {
+            abort(403, 'Vous n\'avez pas accès à ce profil.');
+        }
+
+        if ($this->findCompteForProfil($profil) !== null) {
+            return back()->with('error', 'Ce profil a déjà un compte utilisateur.');
+        }
+
+        $email = mb_strtolower(trim((string) ($profil->email ?? '')));
+        if ($email === '') {
+            return back()->with('error', 'Ajoutez un e-mail au profil avant de créer le compte.');
+        }
+
+        $password = Str::password(12);
+        try {
+            $user = $this->syncCompteForProfil($profil, $password, $profil->statut === 'actif', true, true);
+        } catch (\Throwable $e) {
+            Log::warning('Création compte profil impossible', [
+                'profil_id' => $profil->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return back()->with('error', 'Impossible de créer le compte. Vérifiez que l’e-mail et le matricule ne sont pas déjà utilisés.');
+        }
+
+        if ($user === null) {
+            return back()->with('error', 'Impossible de créer le compte utilisateur.');
+        }
+
+        return back()->with('success', "Compte créé pour {$profil->prenom} {$profil->nom}. Mot de passe temporaire : {$password}");
     }
 
     /**
@@ -923,6 +868,7 @@ class ProfilController extends Controller
                 'fonction' => ['fonction', 'function', 'poste', 'job', 'position'],
                 'departement' => ['departement', 'department', 'département', 'dept'],
                 'site' => ['site', 'agence', 'agency', 'location'],
+                'filiale' => ['filiale', 'filiale_nom', 'subsidiary', 'filiales', 'environnement'],
                 'type_contrat' => ['type_contrat', 'type contrat', 'contract_type', 'contrat'],
                 'statut' => ['status', 'etat', 'état', 'statut actif'],
                 'n_plus_1' => ['n+1', 'n_plus_1', 'n plus 1', 'superieur', 'superieur hierarchique', 'superieur_hierarchique', 'manager', 'responsable'],
@@ -973,6 +919,7 @@ class ProfilController extends Controller
                     $fonction = isset($mappedColumns['fonction']) ? trim($row[$mappedColumns['fonction']] ?? '') : null;
                     $departement = isset($mappedColumns['departement']) ? trim($row[$mappedColumns['departement']] ?? '') : null;
                     $site = isset($mappedColumns['site']) ? trim($row[$mappedColumns['site']] ?? '') : null;
+                    $filialeNom = isset($mappedColumns['filiale']) ? trim($row[$mappedColumns['filiale']] ?? '') : null;
                     $typeContrat = isset($mappedColumns['type_contrat']) ? trim($row[$mappedColumns['type_contrat']] ?? '') : 'CDI';
                     $statut = isset($mappedColumns['statut']) ? trim($row[$mappedColumns['statut']] ?? '') : 'actif';
 
@@ -1070,15 +1017,32 @@ class ProfilController extends Controller
                         $departement = $departementModel->nom;
                     }
 
-                    // Trouver ou créer la filiale "Sénégal" par défaut pour tous les profils importés
-                    $filialeSenegal = Filiale::firstOrCreate(
-                        ['nom' => 'Sénégal'],
-                        [
-                            'nom' => 'Sénégal',
-                            'description' => 'Filiale Sénégal',
-                            'actif' => true,
-                        ]
-                    );
+                    // Résoudre la filiale : colonne Excel si fournie, sinon Sénégal par défaut
+                    $filialeModel = null;
+                    if ($filialeNom !== null && $filialeNom !== '') {
+                        $filialeModel = Filiale::query()
+                            ->whereRaw('UPPER(TRIM(nom)) = ?', [mb_strtoupper(trim($filialeNom))])
+                            ->first();
+
+                        if (! $filialeModel) {
+                            $filialeModel = Filiale::query()->create([
+                                'nom' => trim($filialeNom),
+                                'description' => 'Filiale '.trim($filialeNom),
+                                'actif' => true,
+                            ]);
+                        }
+                    }
+
+                    if (! $filialeModel) {
+                        $filialeModel = Filiale::firstOrCreate(
+                            ['nom' => 'Sénégal'],
+                            [
+                                'nom' => 'Sénégal',
+                                'description' => 'Filiale Sénégal',
+                                'actif' => true,
+                            ]
+                        );
+                    }
 
                     // Synchroniser le site/agence avec la table agences
                     if ($site) {
@@ -1092,13 +1056,13 @@ class ProfilController extends Controller
                                 'code_agent' => null, // Laisser vide
                                 'description' => 'Agence '.$siteNormalized,
                                 'actif' => true,
-                                'filiale_id' => $filialeSenegal->id, // Lier à la filiale Sénégal par défaut
+                                'filiale_id' => $filialeModel->id,
                             ]
                         );
 
                         // Si l'agence existait déjà sans filiale, la mettre à jour
                         if (! $agenceModel->filiale_id) {
-                            $agenceModel->filiale_id = $filialeSenegal->id;
+                            $agenceModel->filiale_id = $filialeModel->id;
                             $agenceModel->save();
                         }
 
@@ -1253,7 +1217,7 @@ class ProfilController extends Controller
 
                     $emailNorm = $email ? mb_strtolower(trim($email)) : null;
 
-                    // Créer le profil avec la filiale Sénégal
+                    // Créer le profil avec la filiale résolue
                     $profil = Profil::create([
                         'nom' => $nom,
                         'prenom' => $prenom,
@@ -1267,7 +1231,7 @@ class ProfilController extends Controller
                         'statut' => $statut,
                         'n_plus_1_id' => $nPlus1Id,
                         'n_plus_2_id' => $nPlus2Id,
-                        'filiale_id' => $filialeSenegal->id,
+                        'filiale_id' => $filialeModel->id,
                     ]);
 
                     if ($emailNorm) {
@@ -1320,22 +1284,7 @@ class ProfilController extends Controller
 
         // Construire la requête de base (même logique que index)
         $query = Profil::query();
-
-        // Admin et RH voient tous les profils
-        if ($user && ($user->isAdmin() || $user->isRh())) {
-            // Pas de restriction pour l'admin et RH
-        } else {
-            // Les autres voient uniquement leur propre profil et leurs subordonnés
-            $profil = $user?->profil;
-            if ($profil) {
-                $query->where(function ($q) use ($profil) {
-                    $q->where('id', $profil->id)
-                        ->orWhere('n_plus_1_id', $profil->id);
-                });
-            } else {
-                $query->where('id', 0);
-            }
-        }
+        $query = $this->applyFilialeFilter($query, $user);
 
         // Appliquer les mêmes filtres que dans index
         if ($request->has('statut') && $request->statut !== '') {
@@ -1358,6 +1307,10 @@ class ProfilController extends Controller
             if ($agence) {
                 $query->where('site', $agence->nom);
             }
+        }
+
+        if ($request->filled('filiale')) {
+            $query->where('filiale_id', (int) $request->filiale);
         }
 
         if ($request->has('type_contrat') && $request->type_contrat) {

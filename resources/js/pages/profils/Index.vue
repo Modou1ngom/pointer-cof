@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Button } from '@/components/ui/button';
 import DataTable, { type Column } from '@/components/DataTable.vue';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getInitials } from '@/composables/useInitials';
-import { computed } from 'vue';
-import { Eye, Pencil, Trash2, Filter, Upload, Download, Lock, Unlock } from 'lucide-vue-next';
+import { computed, ref } from 'vue';
+import { Eye, Pencil, Trash2, Filter, Upload, Download, Lock, Unlock, UserPlus, Plus } from 'lucide-vue-next';
 import { Input } from '@/components/ui/input';
-import { ref } from 'vue';
 
 interface CompteUtilisateur {
     id: number;
@@ -45,11 +44,14 @@ interface Props {
     };
     departements?: Array<{ id: number; nom: string }>;
     agences?: Array<{ id: number; nom: string }>;
+    filiales?: Array<{ id: number; nom: string }>;
     roles?: Array<{ id: number; nom: string }>;
     canManageComptes?: boolean;
 }
 
 const props = defineProps<Props>();
+const page = usePage();
+const flash = computed(() => page.props.flash as { success?: string; error?: string } | undefined);
 
 // Filtres
 const filters = ref({
@@ -57,6 +59,7 @@ const filters = ref({
     departement: '',
     fonction: '',
     site: '',
+    filiale: '',
     type_contrat: '',
     compte: '',
     role: '',
@@ -73,13 +76,6 @@ const applyFilters = () => {
     });
     params.set('page', '1');
     router.visit(`/profils?${params.toString()}`, { preserveScroll: true });
-};
-
-const syncComptesManquants = () => {
-    if (!confirm('Créer les comptes utilisateurs manquants pour tous les profils ayant un e-mail ?')) {
-        return;
-    }
-    router.post('/profils/sync-comptes', {}, { preserveScroll: true });
 };
 
 const exportProfils = () => {
@@ -99,6 +95,7 @@ const initializeFilters = () => {
     filters.value.departement = urlParams.get('departement') || '';
     filters.value.fonction = urlParams.get('fonction') || '';
     filters.value.site = urlParams.get('site') || '';
+    filters.value.filiale = urlParams.get('filiale') || '';
     filters.value.type_contrat = urlParams.get('type_contrat') || '';
     filters.value.compte = urlParams.get('compte') || '';
     filters.value.role = urlParams.get('role') || '';
@@ -151,6 +148,14 @@ const breadcrumbs: BreadcrumbItem[] = [
 const deleteProfil = (id: number) => {
     if (confirm('Êtes-vous sûr de vouloir supprimer ce profil ?')) {
         router.delete(`/profils/${id}`);
+    }
+};
+
+const creerCompte = (id: number) => {
+    if (confirm('Créer un compte utilisateur pour ce profil ? Un mot de passe temporaire sera affiché.')) {
+        router.post(`/profils/${id}/creer-compte`, {}, {
+            preserveScroll: true,
+        });
     }
 };
 
@@ -229,6 +234,18 @@ const tableData = computed(() => {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6">
+            <div
+                v-if="flash?.success"
+                class="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800"
+            >
+                {{ flash.success }}
+            </div>
+            <div
+                v-if="flash?.error"
+                class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+            >
+                {{ flash.error }}
+            </div>
             <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div>
                     <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">Profils & comptes</h1>
@@ -236,12 +253,12 @@ const tableData = computed(() => {
                 </div>
                 <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
                     <Button
-                        v-if="props.canManageComptes"
                         variant="outline"
-                        class="border-blue-300 text-blue-700 hover:bg-blue-50 w-full sm:w-auto"
-                        @click="syncComptesManquants"
+                        class="border-[#185FA5] text-[#185FA5] hover:bg-blue-50 w-full sm:w-auto"
+                        @click="router.visit('/pointage/rh/employes?create=1')"
                     >
-                        Créer comptes manquants
+                        <Plus class="mr-2 h-4 w-4" />
+                        Créer un profil
                     </Button>
                     <Button
                         @click="exportProfils"
@@ -309,6 +326,22 @@ const tableData = computed(() => {
                                 :value="agence.id"
                             >
                                 {{ agence.nom }}
+                            </option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="mb-1.5 block text-base font-medium text-gray-700">Filiale</label>
+                        <select
+                            v-model="filters.filiale"
+                            class="flex h-9 w-full rounded-md border border-gray-300 bg-white px-3 py-1 text-base text-gray-900 shadow-sm transition-[color,box-shadow] outline-none focus-visible:border-gray-400 focus-visible:ring-1 focus-visible:ring-gray-400"
+                        >
+                            <option value="">Toutes les filiales</option>
+                            <option
+                                v-for="filiale in props.filiales || []"
+                                :key="filiale.id"
+                                :value="filiale.id"
+                            >
+                                {{ filiale.nom }}
                             </option>
                         </select>
                     </div>
@@ -381,7 +414,7 @@ const tableData = computed(() => {
                     <Button @click="applyFilters" class="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto">
                         Appliquer les filtres
                     </Button>
-                    <Button variant="outline" @click="() => { filters.statut = ''; filters.departement = ''; filters.fonction = ''; filters.site = ''; filters.type_contrat = ''; filters.compte = ''; filters.role = ''; filters.activation = ''; filters.search = ''; applyFilters(); }" class="border-gray-300 w-full sm:w-auto">
+                    <Button variant="outline" @click="() => { filters.statut = ''; filters.departement = ''; filters.fonction = ''; filters.site = ''; filters.filiale = ''; filters.type_contrat = ''; filters.compte = ''; filters.role = ''; filters.activation = ''; filters.search = ''; applyFilters(); }" class="border-gray-300 w-full sm:w-auto">
                         Réinitialiser
                     </Button>
                 </div>
@@ -479,6 +512,15 @@ const tableData = computed(() => {
                         >
                             <Pencil class="h-5 w-5" />
                         </Link>
+                        <button
+                            v-if="props.canManageComptes && !item.compteId"
+                            type="button"
+                            class="inline-flex items-center justify-center rounded-md p-2 text-blue-600 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                            title="Créer le compte utilisateur"
+                            @click="creerCompte(item.id)"
+                        >
+                            <UserPlus class="h-5 w-5" />
+                        </button>
                         <button
                             v-if="props.canManageComptes && item.compteId"
                             type="button"

@@ -672,9 +672,40 @@ class PointageController extends Controller
         if (! is_string($serviceFiltre)) {
             $serviceFiltre = 'tous';
         }
+        $filialeRaw = $request->query('filiale', 'tous');
+        $filialeFiltre = is_numeric($filialeRaw) ? (int) $filialeRaw : 'tous';
+        $searchFiltre = $request->query('search', '');
+        if (! is_string($searchFiltre)) {
+            $searchFiltre = '';
+        }
+        $searchFiltre = trim($searchFiltre);
 
         $query = PointageAffectation::query()->with(['profil', 'user', 'agences']);
 
+        $perimetreIds = $user->filialeIdsDuPerimetre();
+        if ($filialeFiltre !== 'tous' && ! in_array($filialeFiltre, $perimetreIds, true)) {
+            $filialeFiltre = 'tous';
+        }
+        if ($perimetreIds === []) {
+            $query->whereRaw('1 = 0');
+        } else {
+            $query->whereHas('profil', fn ($q) => $q->whereIn('filiale_id', $perimetreIds));
+        }
+
+        if ($filialeFiltre !== 'tous') {
+            $query->whereHas('profil', fn ($q) => $q->where('filiale_id', $filialeFiltre));
+        }
+        if ($searchFiltre !== '') {
+            $like = '%'.$searchFiltre.'%';
+            $query->whereHas('profil', function ($q) use ($like) {
+                $q->where(function ($sq) use ($like) {
+                    $sq->where('nom', 'like', $like)
+                        ->orWhere('prenom', 'like', $like)
+                        ->orWhere('matricule', 'like', $like)
+                        ->orWhere('email', 'like', $like);
+                });
+            });
+        }
         if ($agenceFiltre !== '' && $agenceFiltre !== 'tous') {
             $query->where(function ($q) use ($agenceFiltre) {
                 $q->whereHas('profil', fn ($sq) => $sq->where('site', $agenceFiltre))
@@ -692,10 +723,24 @@ class PointageController extends Controller
             $query->where('statut_activation', false);
         }
 
-        $agencesListe = Agence::query()->where('actif', true)->orderBy('nom')->pluck('nom')
+        $agencesListeQuery = Agence::query()->where('actif', true)->orderBy('nom');
+        $servicesBase = Profil::query()
+            ->whereIn('id', PointageAffectation::query()->pluck('profil_id'))
+            ->whereNotNull('departement')
+            ->where('departement', '!=', '');
+        if ($perimetreIds !== []) {
+            $agencesListeQuery->whereIn('filiale_id', $perimetreIds);
+            $servicesBase->whereIn('filiale_id', $perimetreIds);
+        } else {
+            $agencesListeQuery->whereRaw('1 = 0');
+            $servicesBase->whereRaw('1 = 0');
+        }
+
+        $agencesListe = $agencesListeQuery->pluck('nom')
             ->merge(
                 Profil::query()
                     ->whereIn('id', PointageAffectation::query()->pluck('profil_id'))
+                    ->when($perimetreIds !== [], fn ($q) => $q->whereIn('filiale_id', $perimetreIds))
                     ->whereNotNull('site')
                     ->where('site', '!=', '')
                     ->distinct()
@@ -706,10 +751,7 @@ class PointageController extends Controller
             ->values()
             ->all();
 
-        $servicesListe = Profil::query()
-            ->whereIn('id', PointageAffectation::query()->pluck('profil_id'))
-            ->whereNotNull('departement')
-            ->where('departement', '!=', '')
+        $servicesListe = $servicesBase
             ->distinct()
             ->orderBy('departement')
             ->pluck('departement')
@@ -780,6 +822,8 @@ class PointageController extends Controller
                 'agence' => $agenceFiltre,
                 'service' => $serviceFiltre,
                 'statut' => is_string($statutFiltre) ? $statutFiltre : 'tous',
+                'filiale' => $filialeFiltre === 'tous' ? 'tous' : (string) $filialeFiltre,
+                'search' => $searchFiltre,
             ],
             'agences' => $agencesListe,
             'services' => $servicesListe,
