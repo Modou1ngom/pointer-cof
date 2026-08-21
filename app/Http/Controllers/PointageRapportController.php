@@ -82,19 +82,55 @@ class PointageRapportController extends Controller
 
         $type = $validated['type'];
         $format = $validated['format'] ?? 'csv';
-        $payload = $this->buildRapportPayload($type, $validated, $recuperation);
-        $filenameBase = 'rapport-rh-'.$type.'-'.now()->format('Ymd-His');
 
+        // Tous les exports PDF partagent Dompdf : monter la mémoire AVANT le calcul
+        // des lignes (mensuel/annuel/absences), sinon OOM → 500 avant même le rendu.
+        $prevMemory = null;
+        $prevTime = null;
         if ($format === 'pdf') {
-            return $this->pdfDownload($filenameBase.'.pdf', $payload['title'], $payload['headers'], $payload['rows']);
+            $prevMemory = ini_get('memory_limit');
+            $prevTime = ini_get('max_execution_time');
+            @ini_set('memory_limit', '1024M');
+            @set_time_limit(180);
         }
 
-        return $this->csvStream($filenameBase.'.csv', function () use ($payload): \Generator {
-            yield $payload['headers'];
-            foreach ($payload['rows'] as $row) {
-                yield $row;
+        try {
+            $payload = $this->buildRapportPayload($type, $validated, $recuperation);
+            $filenameBase = 'rapport-rh-'.$type.'-'.now()->format('Ymd-His');
+
+            if ($format === 'pdf') {
+                return $this->pdfDownload($filenameBase.'.pdf', $payload['title'], $payload['headers'], $payload['rows']);
             }
-        });
+
+            return $this->csvStream($filenameBase.'.csv', function () use ($payload): \Generator {
+                yield $payload['headers'];
+                foreach ($payload['rows'] as $row) {
+                    yield $row;
+                }
+            });
+        } catch (\Throwable $e) {
+            if ($format === 'pdf') {
+                \Illuminate\Support\Facades\Log::error('Export PDF rapport RH échoué', [
+                    'type' => $type,
+                    'message' => $e->getMessage(),
+                    'file' => $e->getFile().':'.$e->getLine(),
+                ]);
+
+                return redirect()
+                    ->route('pointage.rapport.reporting')
+                    ->with('error', 'Export PDF impossible (mémoire ou données trop volumineuses). Réessayez en CSV, ou filtrez par agence / département.');
+            }
+            throw $e;
+        } finally {
+            if ($format === 'pdf') {
+                if (is_string($prevMemory) && $prevMemory !== '') {
+                    @ini_set('memory_limit', $prevMemory);
+                }
+                if ($prevTime !== false && $prevTime !== null && $prevTime !== '') {
+                    @set_time_limit((int) $prevTime);
+                }
+            }
+        }
     }
 
     public function exportMensuelRh(Request $request): StreamedResponse
@@ -1776,6 +1812,9 @@ class PointageRapportController extends Controller
      */
     private function pdfDownload(string $filename, string $title, array $headers, array $rows): HttpResponse
     {
+        @ini_set('memory_limit', '1024M');
+        @set_time_limit(180);
+
         $th = '';
         foreach ($headers as $h) {
             $th .= '<th style="border:1px solid #ccc;padding:6px;background:#F5FAFF;text-align:left;font-size:11px;">'
@@ -1802,12 +1841,21 @@ class PointageRapportController extends Controller
             <table><thead><tr>'.$th.'</tr></thead><tbody>'.$body.'</tbody></table>
         </body></html>';
 
-        $dompdf = new \Dompdf\Dompdf;
+        $options = new \Dompdf\Options;
+        $options->set('isRemoteEnabled', false);
+        $options->set('isHtml5ParserEnabled', true);
+        $options->set('defaultFont', 'DejaVu Sans');
+        $options->set('isFontSubsettingEnabled', true);
+
+        $dompdf = new \Dompdf\Dompdf($options);
         $dompdf->loadHtml($html);
         $dompdf->setPaper('A4', 'landscape');
         $dompdf->render();
 
-        return response($dompdf->output(), 200, [
+        $binary = $dompdf->output();
+        unset($dompdf, $html, $body, $th);
+
+        return response($binary, 200, [
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="'.$filename.'"',
         ]);
@@ -1818,10 +1866,20 @@ class PointageRapportController extends Controller
      */
     private function rapportRhActifUserIds(): array
     {
-        $emails = Profil::query()
+        $profilQuery = Profil::query()
             ->where('statut', 'actif')
             ->whereNotNull('email')
-            ->where('email', '!=', '')
+            ->where('email', '!=', '');
+
+        $actor = Auth::user();
+        if ($actor) {
+            $filialeIds = $actor->filialeIdsDuPerimetre();
+            if ($filialeIds !== []) {
+                $profilQuery->whereIn('filiale_id', $filialeIds);
+            }
+        }
+
+        $emails = $profilQuery
             ->whereExists(function ($sub): void {
                 $sub->selectRaw('1')
                     ->from('users')
