@@ -148,13 +148,13 @@ function setTypeFilter(type: string) {
     applyFilters();
 }
 
-function typeHeaderClass(type: string): string {
+function typeChipClass(type: string): string {
     const active = localFilters.type === type;
     return [
-        'px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wide transition',
+        'rounded-full px-3 py-1.5 text-xs font-semibold transition',
         active
-            ? 'bg-[#F3E8FF] text-[#5B2C8F] underline decoration-2 underline-offset-4'
-            : 'text-[#888780] hover:bg-[#F8F5FC] hover:text-[#5B2C8F]',
+            ? 'bg-[#5B2C8F] text-white'
+            : 'bg-[#F3F4F6] text-[#4B5563] hover:bg-[#EDE9FE] hover:text-[#5B2C8F]',
     ].join(' ');
 }
 
@@ -186,7 +186,7 @@ function periode(d: Decl): string {
         if (d.type === 'allaitement' && sens) {
             s += ` (${sens === 'sortie' ? 'Après-midi' : 'Matin'} ${d.heure_debut || d.heure_fin})`;
         } else {
-            s += ` (${[d.heure_debut, d.heure_fin].filter(Boolean).join('–')})`;
+        s += ` (${[d.heure_debut, d.heure_fin].filter(Boolean).join('–')})`;
         }
     }
     return s;
@@ -439,6 +439,30 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                 <button type="submit" class="rounded-md bg-[#185FA5] px-4 py-2 text-sm font-medium text-white">Filtrer</button>
             </form>
 
+                <!-- Filtres type (chips) — au-dessus du tableau, pas en en-têtes de colonnes -->
+                <div
+                    v-if="!isToutes"
+                    class="flex flex-wrap items-center gap-2 border-b border-[#F1EFE8] px-5 py-3"
+                >
+                    <span class="mr-1 text-[11px] font-bold uppercase text-[#888780]">Type :</span>
+                    <button
+                        type="button"
+                        :class="typeChipClass('tous')"
+                        @click="localFilters.type = 'tous'; applyFilters()"
+                    >
+                        Tous
+                    </button>
+                    <button
+                        v-for="t in typesFiltres"
+                        :key="'chip-' + t.value"
+                        type="button"
+                        :class="typeChipClass(t.value)"
+                        @click="setTypeFilter(t.value)"
+                    >
+                        {{ t.label }}
+                    </button>
+                </div>
+
                 <div class="overflow-x-auto">
                     <!-- Layout image 3 : Toutes les demandes -->
                     <table v-if="isToutes" class="w-full min-w-[1100px] text-sm">
@@ -562,46 +586,17 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                         </tbody>
                     </table>
 
-                    <!-- Layout image 1 : En attente / Historique -->
-                    <table v-else class="w-full min-w-[1100px] text-sm">
-                        <thead class="bg-[#FAFAF8]">
+                    <!-- Layout En attente / Historique : libellés alignés sur les colonnes -->
+                    <table v-else class="w-full min-w-[980px] text-sm">
+                        <thead class="bg-[#FAFAF8] text-left text-[11px] font-bold uppercase tracking-wide text-[#888780]">
                             <tr>
-                                <th class="px-5 py-3">
-                                    <button type="button" class="w-full text-left" :class="typeHeaderClass('absence')" @click="setTypeFilter('absence')">
-                                        Absence
-                                    </button>
-                                </th>
-                                <th class="px-0 py-0">
-                                    <button type="button" class="w-full px-4 py-3 text-left" :class="typeHeaderClass('conge_annuel')" @click="setTypeFilter('conge_annuel')">
-                                        Congé annuel
-                                    </button>
-                                </th>
-                                <th class="px-0 py-0">
-                                    <button type="button" class="w-full px-4 py-3 text-left" :class="typeHeaderClass('conge_maladie')" @click="setTypeFilter('conge_maladie')">
-                                        Congé maladie
-                                    </button>
-                                </th>
-                                <th class="px-0 py-0">
-                                    <button type="button" class="w-full px-4 py-3 text-left" :class="typeHeaderClass('permission_exceptionnelle')" @click="setTypeFilter('permission_exceptionnelle')">
-                                        Permission exceptionnelle
-                                    </button>
-                                </th>
-                                <th class="px-0 py-0">
-                                    <button type="button" class="w-full px-4 py-3 text-left" :class="typeHeaderClass('allaitement')" @click="setTypeFilter('allaitement')">
-                                        Allaitement
-                                    </button>
-                                </th>
-                                <th class="px-0 py-0">
-                                    <button type="button" class="w-full px-4 py-3 text-left" :class="typeHeaderClass('mission')" @click="setTypeFilter('mission')">
-                                        Mission
-                                    </button>
-                                </th>
-                                <th class="px-0 py-0">
-                                    <button type="button" class="w-full px-4 py-3 text-left" :class="typeHeaderClass('formation')" @click="setTypeFilter('formation')">
-                                        Formation
-                                    </button>
-                                </th>
-                                <th class="px-5 py-3 text-right text-[11px] font-bold uppercase tracking-wide text-[#888780]">Actions</th>
+                                <th class="px-5 py-3">Agent</th>
+                                <th class="px-4 py-3">Jours</th>
+                                <th class="px-4 py-3">Type de demande</th>
+                                <th class="px-4 py-3">Période</th>
+                                <th class="px-4 py-3">Lieu / N+1</th>
+                                <th class="px-4 py-3">Date de reprise</th>
+                                <th class="px-5 py-3 text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -695,7 +690,7 @@ const isToutes = computed(() => localFilters.onglet === 'toutes');
                                 </td>
                             </tr>
                             <tr v-if="!declarations.data?.length">
-                                <td colspan="8" class="px-5 py-12 text-center text-[#888780]">Aucune déclaration pour ces filtres.</td>
+                                <td colspan="7" class="px-5 py-12 text-center text-[#888780]">Aucune déclaration pour ces filtres.</td>
                             </tr>
                         </tbody>
                     </table>
